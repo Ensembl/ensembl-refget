@@ -1,0 +1,3 @@
+fastapi
+pydantic
+indexed_zstd
