@@ -1,16 +1,49 @@
+"""
+See the NOTICE file distributed with this work for additional information
+regarding copyright ownership.
+
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 from __future__ import annotations
+import dbm.gnu
+import os
+import resource
+from typing import Optional
+
+from cachetools import LFUCache
 from fastapi import FastAPI, Header, HTTPException, Response, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from indexed_zstd import IndexedZstdFile
-from models import Metadata, Metadata1, RefgetServiceInfo, Refget, ServiceType, Organization
 from pydantic import conint
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse, PlainTextResponse, FileResponse
-from typing import Optional
-import asyncio
-import dbm.gnu
-import os
+
+from models import (
+    Metadata,
+    Metadata1,
+    RefgetServiceInfo,
+    Refget,
+    ServiceType,
+    Organization,
+)
+
+class FHCache(LFUCache):
+    def popitem(self):
+        filename, file = super().popitem()
+        file.close()
+        return filename, file
 
 # Refget server implemetation
 # This conforms to Refget API Specification v2.0.0
@@ -20,23 +53,42 @@ import os
 ################################################################################
 INDEXDBPATH = "./data/index.gdbm"
 SEQPATH = "./"
-CACHE = {}
+
+# Number of filehandles that this app may keep open to read the compressed data
+# files. There will be some more open file handles for STDIN, STDOUT, STDERR and
+# the indexdb. There might be more associated with Python, nginx or loggers.
+softlimit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+MAX_OPEN_FILEHANDLES = softlimit - 24
+
+# This cache stores opened file handles with the associated IndexedZstdFile
+# object. It will store up to MAX_OPEN_FILEHANDLES and automatically evict the
+# least frequently used ones when that limit is reached.
+CACHE = FHCache(maxsize=MAX_OPEN_FILEHANDLES)
+
 DB = dbm.gnu.open(INDEXDBPATH, "r")
+
+# Maximum number of (uncompressed) bytes to read per loop iteration. Also
+# controls the minimum response size to start compressing the response.
 CHUNKSIZE = 128 * 1024
+
+# Version of this app. This is not the protocol version
 SERVICEVERSION = "1.0.0"
 
 ################################################################################
 # FastAPI app config
 ################################################################################
 app = FastAPI(
-    description='System for retrieving sequence and metadata concerning a reference sequence object by hash identifiers',
+    description=(
+        "System for retrieving sequence and metadata concerning a reference sequence"
+        " object by hash identifiers"
+    ),
     version=SERVICEVERSION,
-    title='Refget API server',
+    title="Refget API server",
     contact={
-        'name': 'EMBL-EBI GAA Infrastructure team',
-        'email': 'ensembl-infrastructure@ebi.ac.uk',
-        'url': 'https://refget-infra.internal.ebi.ac.uk',
-    }
+        "name": "EMBL-EBI GAA Infrastructure team",
+        "email": "ensembl-infrastructure@ebi.ac.uk",
+        "url": "https://refget-infra.internal.ebi.ac.uk",
+    },
 )
 
 
@@ -47,7 +99,7 @@ app.add_middleware(GZipMiddleware, minimum_size=2 * CHUNKSIZE, compresslevel=1)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['*'],
+    allow_origins=["*"],
     # allow_credentials=False is the default if origin is *, but better be explicit
     allow_credentials=False,
     allow_methods=["*"],
@@ -59,14 +111,17 @@ app.add_middleware(
 # Helper methods / functions
 ################################################################################
 async def read_zstd(filename, start, length):
+    """
+    Read from zst compressed file in chunks, yield uncompressed data.
+    """
 
     if filename in CACHE:
         file = CACHE[filename]
     else:
         try:
             file = IndexedZstdFile(filename)
-        except:
-            raise HTTPException(status_code=500, detail=f"Error opening {filename}")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Error opening {filename}") from exc
         CACHE[filename] = file
 
     chunkstart = 0
@@ -79,21 +134,65 @@ async def read_zstd(filename, start, length):
             data = file.read(readlen)
 
             chunkstart += readlen
-        except:
-            raise HTTPException(status_code=500, detail="Error reading sequence data")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Error reading sequence data") from exc
 
         yield data
 
 
+def get_record(qid: str) -> tuple(str, int, int):
+    """
+    Do a lookup for a query id in the index database.
+    """
+
+    record = DB.get(qid.encode())
+    if record is None:
+        raise HTTPException(status_code=404, detail="Sequence ID not found")
+    record = record.decode("utf-8")
+    [path, seqstart, seqlength] = record.split("\t")
+    seqstart = int(seqstart)
+    seqlength = int(seqlength)
+
+    return (path, seqstart, seqlength)
+
+
+def parse_range(range_raw_line: str) -> Tuple[int, int | None]:
+    """
+    Parse the Range header, return (start, end).
+    Does not support multiple ranges (e.g. "Range: bytes=0-50, 100-150").
+    A range like "100-" is valid and will return (100, None).
+    """
+
+    try:
+        unit, ranges_str = range_raw_line.split("=", maxsplit=1)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Invalid 'Range' header"
+        )
+    if unit != "bytes":
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid unit for 'Range' header. Only 'bytes' ranges are supported."
+        )
+
+    matches = re.match(r"(\d+)-(\d+)?", ranges_str)
+
+    if matches is None:
+        raise HTTPException(
+            status_code=400, detail="Invalid 'Range' header."
+        )
+
+    return (matches[1], matches[2])
+
 ################################################################################
 # App logic
 ################################################################################
-@app.api_route(
-    "/",
-    methods=['GET', 'HEAD'],
-    include_in_schema=False
-)
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 async def root():
+    """
+    Return HTML for the index page.
+    """
+
     return HTMLResponse("""
     <html>
         <head>
@@ -131,144 +230,158 @@ async def root():
     </html>
     """)
 
+
 # The most important thing
-@app.api_route(
-    '/favicon.ico',
-    methods=['GET', 'HEAD'],
-    include_in_schema=False
-)
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
 async def favicon():
-    return FileResponse('favicon.ico')
+    """
+    Return a FileResponse for the favicon.
+    """
+
+    return FileResponse("favicon.ico")
 
 
 # service-info
 @app.api_route(
-    '/sequence/service-info',
-    methods=['GET', 'HEAD'],
+    "/sequence/service-info",
+    methods=["GET", "HEAD"],
     response_model=RefgetServiceInfo,
-    tags=['Other']
+    tags=["Other"],
 )
 async def service_info() -> RefgetServiceInfo:
     """
-    Retrieve a summary of features this API deployment supports
+    Retrieve a RefgetServiceInfo describing the features this API deployment supports.
     """
     return RefgetServiceInfo(
-        refget = Refget(
-            circular_supported = False,
-            algorithms = ["md5", "ga4gh", "trunc512"]
-        ),
+        refget=Refget(circular_supported=False, algorithms=["md5", "ga4gh", "trunc512"]),
         id="refget.infra.ebi.ac.uk",
         name="Refget server",
-        type=ServiceType(
-            group="org.ga4gh",
-            artifact="refget",
-            version="2.0.0"
-        ),
-        organization=Organization(
-            name="EMBL-EBI",
-            url="https://ebi.ac.uk"
-        ),
-        version=SERVICEVERSION
+        type=ServiceType(group="org.ga4gh", artifact="refget", version="2.0.0"),
+        organization=Organization(name="EMBL-EBI", url="https://ebi.ac.uk"),
+        version=SERVICEVERSION,
     )
+
 
 # sequence retrieval
 @app.api_route(
-    '/sequence/{qid}',
-    methods=['GET', 'HEAD'],
+    "/sequence/{qid}", methods=["GET", "HEAD", "OPTIONS"],
     response_model=str,
-    tags=['Sequence']
+    tags=["Sequence"]
 )
 async def sequence(
     request: Request,
     qid: str,
     start: Optional[conint(ge=0)] = None,
     end: Optional[conint(ge=0)] = None,
-    range: Optional[str] = Header(None, alias='Range'),
+    range_header: Optional[str] = Header(None, alias="Range"),
 ) -> StreamingResponse | PlainTextResponse:
     """
-    Fetch and return sequence data for an identifier
+    Fetch and return sequence data for an identifier.
     """
-
-    # TODO: handle range
 
     # 400: bad request
     # 406 Not Acceptable
     # 416 Range Not Satisfiable
     # 501: not implemented
 
+    if range_header:
+        if (start or end):
+            raise HTTPException(
+                status_code=400,
+                detail="Range request and start/end parameters are mutually exclusive"
+            )
+        start, end = parse_range(range_header)
+
+        # In the following code, we don't want to care where this comes from.
+        # But for the range header, the end is inclusive, for refget, the end
+        # parameter is exclusive. Make this match the parameter semantic.
+        if end:
+            end = end + 1
+
+    if start is None:
+        start = 0
+
     # Treat nonsensical requests first
-    if end == 0:
-        return PlainTextResponse('', media_type='text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii')
-    if start:
-        if end and start > end:
-            raise HTTPException(status_code=501, detail="Circular regions not currently supported")
+    if end:
+        if start > end:
+            raise HTTPException(
+                status_code=501, detail="Circular regions not currently supported"
+            )
         if start == end:
-            return PlainTextResponse('', media_type='text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii')
+            return PlainTextResponse(
+                "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
+            )
+
 
     # Fetch data
     path, seqstart, seqlength = get_record(qid)
 
     # Treat range constraints
-    if start:
-        if start > seqlength:
-            # Should be 422, but spec forces 400
-            raise HTTPException(status_code=400, detail="Requested start is beyond end of sequence")
-        if end and start > end:
-            raise HTTPException(status_code=501, detail="Circular regions not currently supported")
+    if start >= seqlength:
+        # Should be 422, but spec forces 400
+        raise HTTPException(
+            status_code=400, detail="Requested start is beyond end of sequence"
+        )
 
-        seqstart += start
-        seqlength -= start
+    if end is None:
+        end = seqlength
 
-    if end:
-        if start is None:
-            start = 0
-        if end < start:
-            raise HTTPException(status_code=422, detail="End must be greater than start")
-        end = end - start
-        if end < seqlength:
-            seqlength = end
-    if range:
-        raise HTTPException(status_code=422, detail=f"Got range: {range}")
+    if start > end:
+        raise HTTPException(
+            status_code=501, detail="Circular regions not currently supported"
+        )
 
-    file = os.path.join(SEQPATH, path, 'seqs/seq.txt.zst')
+    seqstart += start
+    seqlength -= start
 
-    if request.method == 'HEAD':
-        return Response(content=None, headers={'content-length': str(seqlength)} , media_type='text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii')
+    end = end - start
+    seqlength = min(seqlength, end)
+    if seqlength == 0:
+        return PlainTextResponse(
+            "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
+        )
 
-    return StreamingResponse(read_zstd(file, seqstart, seqlength), media_type='text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii')
+    file = os.path.join(SEQPATH, path, "seqs/seq.txt.zst")
 
+    if request.method == "HEAD":
+        return Response(
+            content=None,
+            headers={"content-length": str(seqlength)},
+            media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
+        )
+    if request.method == "OPTIONS":
+        return Response(
+            content=None,
+            headers={"allow": "OPTIONS, GET, HEAD"},
+        )
 
-def get_record(qid: str) -> tuple(str, int, int):
-    record = DB.get(qid.encode())
-    if record is None:
-        raise HTTPException(status_code=404, detail="Sequence ID not found")
-    record = record.decode('utf-8')
-    [ path, seqstart, seqlength ] = record.split('\t')
-    seqstart = int(seqstart)
-    seqlength = int(seqlength)
+    return StreamingResponse(
+        read_zstd(file, seqstart, seqlength),
+        media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
+    )
 
-    return (path, seqstart, seqlength)
 
 
 # sequence metadata
 @app.api_route(
-    '/sequence/{qid}/metadata',
-    methods=['GET', 'HEAD'],
+    "/sequence/{qid}/metadata",
+    methods=["GET", "HEAD"],
     response_model=Metadata,
-    tags=['Metadata']
+    tags=["Metadata"],
 )
 async def metadata(qid: str) -> Metadata:
     """
-    Get reference metadata from a hash
+    Return aliases, length and available hash types for a query hash.
     """
-    path, seqstart, seqlength = get_record(qid)
+    _, _, seqlength = get_record(qid)
 
-    return Metadata(metadata = Metadata1(
-        id=qid,
-        md5="Not available",
-        trunc512=qid,
-        ga4gh="TODO",
-        length=seqlength,
-        aliases=[]
-    ))
-
+    return Metadata(
+        metadata=Metadata1(
+            id=qid,
+            md5="Not available",
+            trunc512=qid,
+            ga4gh="TODO",
+            length=seqlength,
+            aliases=[],
+        )
+    )
