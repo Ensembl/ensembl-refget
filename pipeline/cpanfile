@@ -1,0 +1,15 @@
+requires 'Array::Utils';
+requires 'Capture::Tiny';
+requires 'DBD::mysql';
+requires 'DBI';
+requires 'HTTP::Tiny';
+requires 'IO::String';
+requires 'IO::Socket::SSL';
+requires 'Moose';
+requires 'Net::SSLeay';
+requires 'JSON';
+requires 'Path::Tiny';
+requires 'Tie::File';
+requires 'VCF';
+requires 'YAML::Tiny';
+requires 'List::MoreUtils';
