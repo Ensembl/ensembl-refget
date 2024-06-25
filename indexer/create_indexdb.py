@@ -20,9 +20,15 @@ def add_data(db, basedir, dirname):
         startpos = 0
         for line in file:
             name, md5, sha, _, length, _ = line.split(b"\t")
-#            print(row)
-            value = b"\t".join([dirname.encode('utf-8'), str(startpos).encode('utf-8'), length, name])
-#           print(f"MD5 {md5}; SHA512T {sha}; DATA {value}")
+            value = b"\t".join(
+                [
+                    dirname.encode('utf-8'),
+                    str(startpos).encode('utf-8'),
+                    length,
+                    name,
+                    md5
+                ]
+            )
             db[md5] = sha
             db[sha] = value
             startpos += int(length.decode('utf-8'))
@@ -49,7 +55,7 @@ def main():
             offset_width=5, align_pow=3,
             update_mode="UPDATE_IN_PLACE",
             dbm="HashDBM",
-            num_buckets=1_000_000_000)
+            num_buckets=1_000_000_000).OrDie()
 
     print("DB open OK")
 
@@ -63,7 +69,7 @@ def main():
         add_data(db, datadir, dirname)
 
     # Closes the database.
-    db.Close()
+    db.Close().OrDie()
 
 
 main()

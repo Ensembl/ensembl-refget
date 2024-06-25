@@ -191,7 +191,9 @@ process DumpSequence {
         errorStrategy 'terminate'
     }
 
-    label 'mem64GB'
+    // Currently, the wheat cultivars need around 26 GB of RAM. Most species
+    // need less than 3 GB.
+    label 'mem32GB'
     tag 'bootstrap'
 
     input:

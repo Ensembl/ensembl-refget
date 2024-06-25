@@ -301,7 +301,7 @@ sub fetch_and_write_checksum {
 
     my @bind_values = ($species_id);
 
-    my ($sequence, $dbsequence, $dbsequence_length, $this_name, $db_start, $last_name, $last_start, $seq_start);
+    my ($sequence, $dbsequence_length, $this_name, $db_start, $last_name, $last_start, $seq_start);
 
     my $rows = 0;
     $last_start = 0;
@@ -317,32 +317,36 @@ sub fetch_and_write_checksum {
         my $new_sequence;
 
         if ($ref) {
-            my ($name1, $seq1, $start2, $end2, $cstart2, $strand2, $seq2, $start3, $end3, $cstart3, $strand3, $seq3)
+            my ($name1, undef, $start2, $end2, $cstart2, $strand2, undef, $start3, $end3, $cstart3, $strand3, undef)
                 = @$ref;
-            if ($seq1) {
+            my $seq1 = \$ref->[1];
+            my $seq2 = \$ref->[6];
+            my $seq3 = \$ref->[11];
+
+            if ($$seq1) {
                 $new_sequence = $seq1;
                 $db_start = 1;
-            } elsif ($seq2) {
-                $dbsequence = $seq2;
+            } elsif ($$seq2) {
+                $new_sequence = $seq2;
                 $dbsequence_length = $end2 - $start2 + 1;
                 $db_start = $start2;
                 if ($strand2 == 1) {
-                    $new_sequence = substr($dbsequence, $cstart2 - 1, $dbsequence_length);
+                    $$seq2 = substr($$seq2, $cstart2 - 1, $dbsequence_length);
                 } elsif ($strand2 == -1) {
-                    $new_sequence = substr($dbsequence, $cstart2 - 1, $dbsequence_length);
-                    reverse_comp(\$new_sequence);
+                    $$seq2 = substr($$seq2, $cstart2 - 1, $dbsequence_length);
+                    reverse_comp($seq2);
                 } else {
                     die "Strand is not 1 or -1, instead we got '$strand2'";
                 }
-            } elsif ($seq3) {
-                $dbsequence = $seq3;
+            } elsif ($$seq3) {
+                $new_sequence = $seq3;
                 $dbsequence_length = $end3 - $start3 + 1;
                 $db_start = $start2 + $start3 - 1;
                 if ($strand3 == 1) {
-                    $new_sequence = substr($dbsequence, $cstart3 - 1, $dbsequence_length);
+                    $$seq3 = substr($$seq3, $cstart3 - 1, $dbsequence_length);
                 } elsif ($strand3 == -1) {
-                    $new_sequence = substr($dbsequence, $cstart3 - 1, $dbsequence_length);
-                    reverse_comp(\$new_sequence);
+                    $$seq3 = substr($$seq3, $cstart3 - 1, $dbsequence_length);
+                    reverse_comp($seq3);
                 } else {
                     die "Strand is not 1 or -1, instead we got '$strand3'";
                 }
@@ -395,8 +399,8 @@ sub fetch_and_write_checksum {
             $seq_start += $gap;
         }
 
-        $sequence .= $new_sequence;
-        $seq_start += length($new_sequence);
+        $sequence .= $$new_sequence;
+        $seq_start += length($$new_sequence);
 
         $last_name = $this_name;
     }

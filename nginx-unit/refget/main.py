@@ -16,7 +16,7 @@ limitations under the License.
 """
 
 from __future__ import annotations
-import dbm.gnu
+import tkrzw
 import os
 import resource
 from typing import Optional
@@ -29,6 +29,7 @@ from indexed_zstd import IndexedZstdFile
 from pydantic import conint
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse, PlainTextResponse, FileResponse
+import base64
 
 from models import (
     Metadata,
@@ -45,13 +46,14 @@ class FHCache(LFUCache):
         file.close()
         return filename, file
 
+
 # Refget server implemetation
 # This conforms to Refget API Specification v2.0.0
 
 ################################################################################
 # Globals
 ################################################################################
-INDEXDBPATH = "./data/index.gdbm"
+INDEXDBPATH = "./data/indexdb.tkh"
 SEQPATH = "./"
 
 # Number of filehandles that this app may keep open to read the compressed data
@@ -65,7 +67,9 @@ MAX_OPEN_FILEHANDLES = softlimit - 24
 # least frequently used ones when that limit is reached.
 CACHE = FHCache(maxsize=MAX_OPEN_FILEHANDLES)
 
-DB = dbm.gnu.open(INDEXDBPATH, "r")
+DB = tkrzw.DBM()
+DB.Open(INDEXDBPATH, False, no_create=True, no_wait=True, truncate=False,
+        dbm="HashDBM").OrDie()
 
 # Maximum number of (uncompressed) bytes to read per loop iteration. Also
 # controls the minimum response size to start compressing the response.
@@ -140,20 +144,21 @@ async def read_zstd(filename, start, length):
         yield data
 
 
-def get_record(qid: str) -> tuple(str, int, int):
+def get_record(qid: str) -> tuple(str, int, int, str, str):
     """
-    Do a lookup for a query id in the index database.
+    Do a lookup for a SHA (TRUNC512) query id in the index database.
+    Returns a tuple containing the data for the entry.
     """
 
-    record = DB.get(qid.encode())
+    record = DB.Get(qid.encode())
     if record is None:
         raise HTTPException(status_code=404, detail="Sequence ID not found")
     record = record.decode("utf-8")
-    [path, seqstart, seqlength] = record.split("\t")
+    [path, seqstart, seqlength, name, md5] = record.split("\t")
     seqstart = int(seqstart)
     seqlength = int(seqlength)
 
-    return (path, seqstart, seqlength)
+    return (path, seqstart, seqlength, name, md5)
 
 
 def parse_range(range_raw_line: str) -> Tuple[int, int | None]:
@@ -183,6 +188,55 @@ def parse_range(range_raw_line: str) -> Tuple[int, int | None]:
         )
 
     return (matches[1], matches[2])
+
+
+_is_hex = re.compile('^[0-9a-fA-F]+$').search
+def id_to_sha(qid: str):
+    """
+    Return a sha (TRUNC512) type query. If given an MD5 query id, will do a
+    lookup for the SHA id.
+    """
+
+    if length(qid) == 24 and _is_hex(qid):
+        return qid.lower()
+    if length(qid) == 16 and _is_hex(qid):
+        qid = qid.lower()
+        return DB.get(qid).decode("utf-8")
+    if index(qid, ":"):
+        namespace, query = qid.split(":", maxsplit=1)
+        qid = query
+        if namespace is None:
+            namespace = "ga4gh"
+            namespace = namespace.lower()
+
+    if namespace == "trunc512" and length(qid) == 24 and _is_hex(qid):
+        return qid
+    if namespace == "md5" and length(qid) == 16 and _is_hex(qid):
+        return DB.get(qid).decode("utf-8")
+    if namespace == "ga4gh":
+        return ga4gh_to_sha(qid)
+
+    return None
+
+
+
+def ga4gh_to_sha(qid: str):
+    """
+    Turns ga4gh type digest into truncated sha 512 (TRUNC512) type. Assumes no
+    namespace.
+    """
+    base64_data = qid.replace("SQ.","")
+    sha_bin = base64.urlsafe_b64decode(base64_data)
+    return sha_bin.hex()
+
+def sha_to_ga4gh(sha_txt):
+    """
+    Turns truncated sha 512 (TRUNC512) type digest into ga4gh type. Does not add
+    a namespace.
+    """
+    sha_bin = bytes.fromhex(sha_txt)
+    sha_b64 = base64.urlsafe_b64encode(sha_bin)
+    return f"SQ.{sha_b64}"
 
 ################################################################################
 # App logic
@@ -314,7 +368,7 @@ async def sequence(
 
 
     # Fetch data
-    path, seqstart, seqlength = get_record(qid)
+    path, seqstart, seqlength, _, _ = get_record(qid)
 
     # Treat range constraints
     if start >= seqlength:
@@ -373,15 +427,22 @@ async def metadata(qid: str) -> Metadata:
     """
     Return aliases, length and available hash types for a query hash.
     """
-    _, _, seqlength = get_record(qid)
+
+    sha_id = id_to_sha(qid)
+
+    _, _, _, name, md5_id = get_record(sha_id)
+
+    ga4gh_id = sha_to_ga4gh(sha_id)
 
     return Metadata(
         metadata=Metadata1(
             id=qid,
-            md5="Not available",
-            trunc512=qid,
-            ga4gh="TODO",
+            md5=md5_id,
+            trunc512=sha_id,
+            ga4gh=ga4gh_id,
             length=seqlength,
-            aliases=[],
+            aliases=[
+                {'ensembl': name}
+            ],
         )
     )
