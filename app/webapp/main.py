@@ -16,9 +16,10 @@ limitations under the License.
 """
 
 from __future__ import annotations
-import tkrzw
 import os
+import re
 import resource
+import tkrzw
 from typing import Optional
 
 from cachetools import LFUCache
@@ -54,7 +55,7 @@ class FHCache(LFUCache):
 # Globals
 ################################################################################
 INDEXDBPATH = "./data/indexdb.tkh"
-SEQPATH = "./"
+SEQPATH = "./data/"
 
 # Number of filehandles that this app may keep open to read the compressed data
 # files. There will be some more open file handles for STDIN, STDOUT, STDERR and
@@ -197,21 +198,22 @@ def id_to_sha(qid: str):
     lookup for the SHA id.
     """
 
-    if length(qid) == 24 and _is_hex(qid):
+    if len(qid) == 24 and _is_hex(qid):
         return qid.lower()
-    if length(qid) == 16 and _is_hex(qid):
+    if len(qid) == 16 and _is_hex(qid):
         qid = qid.lower()
         return DB.get(qid).decode("utf-8")
-    if index(qid, ":"):
+
+    namespace = "ga4gh"
+    if ":" in qid:
         namespace, query = qid.split(":", maxsplit=1)
         qid = query
-        if namespace is None:
-            namespace = "ga4gh"
-            namespace = namespace.lower()
 
-    if namespace == "trunc512" and length(qid) == 24 and _is_hex(qid):
+    namespace = namespace.lower()
+
+    if namespace == "trunc512" and len(qid) == 24 and _is_hex(qid):
         return qid
-    if namespace == "md5" and length(qid) == 16 and _is_hex(qid):
+    if namespace == "md5" and len(qid) == 16 and _is_hex(qid):
         return DB.get(qid).decode("utf-8")
     if namespace == "ga4gh":
         return ga4gh_to_sha(qid)
@@ -429,6 +431,8 @@ async def metadata(qid: str) -> Metadata:
     """
 
     sha_id = id_to_sha(qid)
+    if sha_id is None:
+        raise HTTPException(status_code=404, detail="Sequence ID not found")
 
     _, _, _, name, md5_id = get_record(sha_id)
 

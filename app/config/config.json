@@ -8,11 +8,13 @@
     "applications": {
         "fastapi": {
             "type": "python 3.11",
-            "path": "/www/unit/refget",
-            "home": "/www/unit/venv",
+            "path": [
+                "/www/unit/",
+                "/usr/lib/python3/dist-packages"
+            ],
             "module": "main",
             "callable": "app",
-            "working_directory": "/www/unit"
+            "working_directory": "/www/unit/"
         }
     }
 }

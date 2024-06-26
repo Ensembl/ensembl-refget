@@ -1,4 +1,0 @@
-fastapi
-pydantic
-indexed_zstd
-cachetools
