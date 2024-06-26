@@ -16,6 +16,7 @@ limitations under the License.
 """
 
 from __future__ import annotations
+import base64
 import os
 import re
 import resource
@@ -30,9 +31,9 @@ from indexed_zstd import IndexedZstdFile
 from pydantic import conint
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse, PlainTextResponse, FileResponse
-import base64
 
 from models import (
+    Alias,
     Metadata,
     Metadata1,
     RefgetServiceInfo,
@@ -55,7 +56,7 @@ class FHCache(LFUCache):
 # Globals
 ################################################################################
 INDEXDBPATH = "./data/indexdb.tkh"
-SEQPATH = "./data/"
+SEQPATH = "./data"
 
 # Number of filehandles that this app may keep open to read the compressed data
 # files. There will be some more open file handles for STDIN, STDOUT, STDERR and
@@ -115,19 +116,10 @@ app.add_middleware(
 ################################################################################
 # Helper methods / functions
 ################################################################################
-async def read_zstd(filename, start, length):
+async def read_zstd(file, start, length):
     """
     Read from zst compressed file in chunks, yield uncompressed data.
     """
-
-    if filename in CACHE:
-        file = CACHE[filename]
-    else:
-        try:
-            file = IndexedZstdFile(filename)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Error opening {filename}") from exc
-        CACHE[filename] = file
 
     chunkstart = 0
     while chunkstart < length:
@@ -198,11 +190,11 @@ def id_to_sha(qid: str):
     lookup for the SHA id.
     """
 
-    if len(qid) == 24 and _is_hex(qid):
+    if len(qid) == 48 and _is_hex(qid):
         return qid.lower()
-    if len(qid) == 16 and _is_hex(qid):
+    if len(qid) == 32 and _is_hex(qid):
         qid = qid.lower()
-        return DB.get(qid).decode("utf-8")
+        return DB.Get(qid).decode("utf-8")
 
     namespace = "ga4gh"
     if ":" in qid:
@@ -211,10 +203,10 @@ def id_to_sha(qid: str):
 
     namespace = namespace.lower()
 
-    if namespace == "trunc512" and len(qid) == 24 and _is_hex(qid):
+    if namespace == "trunc512" and len(qid) == 48 and _is_hex(qid):
         return qid
-    if namespace == "md5" and len(qid) == 16 and _is_hex(qid):
-        return DB.get(qid).decode("utf-8")
+    if namespace == "md5" and len(qid) == 32 and _is_hex(qid):
+        return DB.Get(qid).decode("utf-8")
     if namespace == "ga4gh":
         return ga4gh_to_sha(qid)
 
@@ -238,6 +230,7 @@ def sha_to_ga4gh(sha_txt):
     """
     sha_bin = bytes.fromhex(sha_txt)
     sha_b64 = base64.urlsafe_b64encode(sha_bin)
+    sha_b64 = sha_b64.decode("utf-8")
     return f"SQ.{sha_b64}"
 
 ################################################################################
@@ -261,25 +254,13 @@ async def root():
                     <a href="sequence/service-info">sequence/service-info</a>
                 </li>
                 <li>
-                    <a href="sequence/093f6ac5627a36f562fe2458b95975d0a60d8cbc4ef736c3">093f6ac, 160KB</a>
+                    <a href="sequence/2f52fa14ef0448864904d4ce4cf2bb1a766f25889ec0a2b4">2f52fa1, 13794 b</a>
                 </li>
                 <li>
-                    <a href="sequence/1e7e23d36c98cd650b817a53b3cb788d570201a354204aef">1e7e23d, 12 MB</a>
+                    <a href="sequence/3b20ace25e343148aafb31b0f0b67058e838197019da55ae">3b20ace, 23533 b</a>
                 </li>
                 <li>
-                    <a href="sequence/ff0779f0c5c47a47479c165d4e79f19b5bfc66cda43ac03a">ff0779f, 23 MB</a>
-                </li>
-                <li>
-                    <a href="sequence/f9f6507d003783b80908384e5502058368b75049498c3f7f">f9f6507, 45 MB</a>
-                </li>
-                <li>
-                    <a href="sequence/000018905fb82da47d20001dad1934f5b4ae7fa9331e5d11">0000189, 469 B</a>
-                </li>
-                <li>
-                    <a href="sequence/000b7e851733e8b1237d461a6cfe016aed77267a9870f5af">000b7e8, 625B</a>
-                </li>
-                <li>
-                    <a href="sequence/093f6ac5627a36f562fe2458b95975d0a60d8cbc4ef736c3/metadata">sequence/{id}/metadata</a>
+                    <a href="sequence/2f52fa14ef0448864904d4ce4cf2bb1a766f25889ec0a2b4/metadata">sequence/2f52fa1.../metadata</a>
                 </li>
             </ul>
         </body>
@@ -369,8 +350,12 @@ async def sequence(
             )
 
 
+    sha_id = id_to_sha(qid)
+    if sha_id is None:
+        raise HTTPException(status_code=404, detail="Sequence ID not found")
+
     # Fetch data
-    path, seqstart, seqlength, _, _ = get_record(qid)
+    path, seqstart, seqlength, _, _ = get_record(sha_id)
 
     # Treat range constraints
     if start >= seqlength:
@@ -397,7 +382,6 @@ async def sequence(
             "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
         )
 
-    file = os.path.join(SEQPATH, path, "seqs/seq.txt.zst")
 
     if request.method == "HEAD":
         return Response(
@@ -411,8 +395,20 @@ async def sequence(
             headers={"allow": "OPTIONS, GET, HEAD"},
         )
 
+    filename = os.path.join(SEQPATH, path, "seqs/seq.txt.zst")
+
+    if filename in CACHE:
+        filehandle = CACHE[filename]
+    else:
+        try:
+            filehandle = IndexedZstdFile(filename)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Error opening {filename}") from exc
+        CACHE[filename] = filehandle
+
+
     return StreamingResponse(
-        read_zstd(file, seqstart, seqlength),
+        read_zstd(filehandle, seqstart, seqlength),
         media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
     )
 
@@ -434,7 +430,7 @@ async def metadata(qid: str) -> Metadata:
     if sha_id is None:
         raise HTTPException(status_code=404, detail="Sequence ID not found")
 
-    _, _, _, name, md5_id = get_record(sha_id)
+    _, _, seqlength, name, md5_id = get_record(sha_id)
 
     ga4gh_id = sha_to_ga4gh(sha_id)
 
@@ -446,7 +442,7 @@ async def metadata(qid: str) -> Metadata:
             ga4gh=ga4gh_id,
             length=seqlength,
             aliases=[
-                {'ensembl': name}
+                Alias(naming_authority='ensembl', alias=name)
             ],
         )
     )
