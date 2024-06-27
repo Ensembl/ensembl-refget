@@ -55,8 +55,8 @@ class FHCache(LFUCache):
 ################################################################################
 # Globals
 ################################################################################
-INDEXDBPATH = "./data/indexdb.tkh"
-SEQPATH = "./data"
+INDEXDBPATH = os.getenv("INDEXDBPATH","/www/unit/data/indexdb.tkh")
+SEQPATH = os.getenv("SEQPATH","/www/unit/data/")
 
 # Number of filehandles that this app may keep open to read the compressed data
 # files. There will be some more open file handles for STDIN, STDOUT, STDERR and
