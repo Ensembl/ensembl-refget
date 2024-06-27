@@ -20,4 +20,4 @@ COPY app/config/config.json /docker-entrypoint.d/.unit.conf.json
 
 CMD ["unitd", "--no-daemon", "--control", "unix:/var/run/control.unit.sock"]
 
-EXPOSE 8001
+EXPOSE 8000
