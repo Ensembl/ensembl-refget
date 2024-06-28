@@ -6,6 +6,7 @@ import re
 import tempfile
 import shutil
 import tkrzw
+from pathlib import Path
 
 
 def add_data(db, basedir, dirname):
@@ -35,16 +36,52 @@ def add_data(db, basedir, dirname):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("datadir", help='Directory holding the data')
-    parser.add_argument("dbfile",
-        help='Database file. Will be created if it does not exist'
+    parser = argparse.ArgumentParser(
+        description=(
+            'This will build the main lookup index for a refget server.'
+            ' By default, this will ingest data for all species / genomes available from'
+            ' <datadir>/genome_uuid_dir/chrom.hashes .'
+        )
+    )
+    parser.add_argument("--datadir", help='Directory holding the data', required=True)
+    parser.add_argument("--dbfile",
+        help=('Database file. Will be created if it does not exist.'
+              ' It is recommended to create the DB in /dev/shm if available,'
+              ' then copy it to permanent storage.'
+              ),
+        required=True
+    )
+    # This is using a file hash database. This specifies the number of buckets
+    # that the hash will have. Ideally, this number should be larger than the
+    # number of keys inserted. If there are more entries, keys will hash to the
+    # same bucket and be stored in a linked list. Eventually, performance will
+    # deteriorate, so this should chosen to be large enough.
+    # If a DB grows over time to exceed the initial value, it should be rebuilt.
+    # That can be done on an existing database but that is not part of this
+    # script so far.
+    # This value is only applied when creating a database. When opening an
+    # existing DB, it does nothing.
+    parser.add_argument("--dbsize",
+        help=(
+            'Tunes the number of hash buckets for the DB. This should ideally be'
+            ' about 20%% more than the number of entries you expect.'
+            ' Default is 1 billion.'
+        ),
+        default=1_000_000_000,
+        required=False,
+        type=int
+    )
+    parser.add_argument("select_dirs",
+        help='One or more directories to include, relative to datadir. Optional. Omit to select all directories.',
+        nargs='*'
     )
     args = parser.parse_args()
 
 
+    dbsize = args.dbsize
     datadir = args.datadir
     dbfile = args.dbfile
+    select_dirs = args.select_dirs
 
     print("Opening DB")
     db = tkrzw.DBM()
@@ -55,12 +92,17 @@ def main():
             offset_width=5, align_pow=3,
             update_mode="UPDATE_IN_PLACE",
             dbm="HashDBM",
-            num_buckets=1_000_000_000).OrDie()
+            num_buckets=dbsize).OrDie()
 
     print("DB open OK")
 
     i = 0
-    for file in os.scandir(datadir):
+    if select_dirs:
+        dirs_to_index = [Path(datadir, dir) for dir in select_dirs]
+    else:
+        dirs_to_index = os.scandir(datadir)
+
+    for file in dirs_to_index:
         if not file.is_dir():
             continue
         dirname = file.name
