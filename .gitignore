@@ -161,6 +161,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 pipeline/venv/
-pipeline/work/
-pipeline/.nextflow/
-pipeline/.nextflow*
+**/nextflow/work
+.nextflow*
+.nextflow/

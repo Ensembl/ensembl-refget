@@ -32,28 +32,19 @@ do_species($genome);
 
 ### End of main
 
-# 1 Fetch data for report plus additional data
-# - write report - this is sorted by karyotype
+# 1 Fetch sorted seq_region data without sequence
 # - keep the report data in memory
 # 2 fetch sequence for each region name in the report
-# - optionally write out sequence files
+# - write out sequence file
 # - calculate checksums
 # - keep the calculated sums in memory
-# - calculate %GC data
-# - build the 'gc.bw' bigWig file with the GC data
-# 3 write chrom files keeping the sort order from the report
+# 3 write chrom files keeping the sort order
 sub do_species {
     my ($genome) = @_;
 
 	my $path = $genome->common_files_path->stringify();
 	my $chrom_file = catfile($path, 'chrom.hashes');
     my $genome_uuid = $genome->genome_uuid();
-
-	if ($skipdone and -f $chrom_file and ! -z $chrom_file) {
-        say "[dump_sequence] Data for genome_uuid $genome_uuid exists, skipping";
-        return;
-    }
-
     my $dbh = $genome->get_dbh();
 
     say "[dump_sequence] Fetch species ID for $genome_uuid";
@@ -61,8 +52,6 @@ sub do_species {
     my $species_id = fetch_species_id($dbh, $species);
     say "[dump_sequence] Fetch region data";
     my ($report, $report_data_list) = fetch_report($dbh, $species_id);
-    # write report to file
-    # write_report_file($genome, $report);
 
     say "[dump_sequence] Fetch sequence data, calculate hashes";
     my $checksum_hash = fetch_and_write_checksum($dbh, $genome, $report_data_list, $species_id);

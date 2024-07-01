@@ -61,6 +61,7 @@ def paramsOrDie() {
 
     allowedParams = [
         'output_path',
+        'fasta_path',
         'script_path',
         'factory_path',
         'dbconnection_file',
@@ -90,7 +91,7 @@ def paramsOrDie() {
     }
 
     for (i in [
-        params.dbconnection_file, params.output_path, params.script_path, params.factory_path,
+        params.dbconnection_file, params.output_path, params.fasta_path, params.script_path, params.factory_path,
         params.metadatadb_key, params.speciesdb_key
     ]) {
         if (! i?.trim()) {
@@ -121,6 +122,7 @@ println """\
          D A T A F I L E - N F   P I P E L I N E
          ===================================
          output_path: ${params.output_path}
+         fasta_path: ${params.fasta_path}
          script_path: ${params.script_path}
          factory_path: ${params.factory_path}
          dbconnection_file: ${params.dbconnection_file}
@@ -144,8 +146,7 @@ workflow {
     GenomeInfoProcess(metadataDBConnStr)
     | splitText
     | combine(Channel.of(speciesDBConnStr))
-    | DumpSequence
-//		| CleanupProcess
+    | ( DumpSequence & DumpCDNA & DumpCDS & DumpPEP)
 }
 
 process GenomeInfoProcess {
@@ -177,7 +178,7 @@ process GenomeInfoProcess {
         --output genome_info.json \
         --batch_size 0 \
         --dataset_status Processed Released \
-				--dataset_type genebuild \
+        --dataset_type genebuild \
         ${g_uuid}
     """
 }
@@ -194,14 +195,10 @@ process DumpSequence {
     // Currently, the wheat cultivars need around 26 GB of RAM. Most species
     // need less than 3 GB.
     label 'mem32GB'
-    tag 'bootstrap'
+    tag 'dump_seq'
 
     input:
     val input
-
-    output:
-    val input
-
 
     when:
     destdir = params.output_path
@@ -209,39 +206,136 @@ process DumpSequence {
     jsonS = new JsonSlurper()
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
-    File file = new File(sprintf("%s/%s/%s/%s", destdir, genome_uuid, 'seqs', 'seq.txt.zst'))
+    File file = new File("${destdir}/${genome_uuid}/seqs/seq.txt.zst")
     ! file.exists()
-
 
     script:
     conf = input[0].trim()
     dbconn = input[1]
 
-    skipdone = params.skipdone ? "--skipdone" : ""
+    File seqfile = new File("${destdir}/${genome_uuid}/seqs/seq.txt")
+    File zstfile = new File("${destdir}/${genome_uuid}/seqs/seq.txt.zst")
     """
     echo [DumpSequence] Dump seq and calc checksum
-    perl ${params.script_path}/dump_sequence.pl --conf '${conf}' --output ${params.output_path} --dbconn '${dbconn}' ${skipdone} 
-    perl ${params.script_path}/compress.pl --conf '${conf}' --output ${params.output_path} ${skipdone} 
+    perl ${params.script_path}/dump_sequence.pl --conf '${conf}' --output ${params.output_path} --dbconn '${dbconn}'
+    perl ${params.script_path}/compress.pl --infile ${seqfile} --outfile ${zstfile}
+    rm -f ${seqfile}
     """
 }
 
-process CleanupProcess {
+
+process DumpCDNA {
     /*
-      Description: Cleans up temporary files left by the pipeline
+      Description: Create cdna.txt and cdna.hashes files from fasta input
     */
-    debug params.debug
-    label 'mem1GB'
-    tag 'cleanup'
+    if (params.debug) {
+        debug params.debug
+        errorStrategy 'terminate'
+    }
+
+    label 'mem4GB'
+    tag 'dump_cdna'
 
     input:
     val input
 
+    when:
+    fastadir = params.fasta_path
+    destdir = params.output_path
+    confStr = input[0].trim()
+    jsonS = new JsonSlurper()
+    confJson = jsonS.parseText(confStr)
+    genome_uuid = confJson.genome_uuid
+    File dest = new File("${destdir}/${genome_uuid}/seqs/cdna.txt.zst")
+    File source = new File("${fastadir}/${genome_uuid}/cdna.fa")
+    source.exists() and ! dest.exists()
+
     script:
-    conf = input[0].trim()
-    dbconn = input[1]
+    File infile =  new File("${fastadir}/${genome_uuid}/cdna.fa")
+    File hashfile= new File("${destdir}/${genome_uuid}/cdna.hashes")
+    File seqfile = new File("${destdir}/${genome_uuid}/seqs/cdna.txt")
+    File zstfile = new File("${destdir}/${genome_uuid}/seqs/cdna.txt.zst")
     """
-    echo [CleanupProcess] Cleaning up temporary files
-    perl ${params.script_path}/cleanup.pl --conf '${conf}' --output ${params.output_path} --dbconn '${dbconn}'
+    echo [DumpCDNA] Dump CDNA seq and calc checksum
+    perl ${params.script_path}/dump_from_fasta.pl --infile ${infile} --hashfile ${hashfile} --seqfile ${seqfile}
+    perl ${params.script_path}/compress.pl --infile ${seqfile} --outfile ${zstfile}
+    rm -f ${seqfile}
+    """
+}
+process DumpCDS {
+    /*
+      Description: Create cds.txt and cds.hashes files from fasta input
+    */
+    if (params.debug) {
+        debug params.debug
+        errorStrategy 'terminate'
+    }
+
+    label 'mem4GB'
+    tag 'dump_cds'
+
+    input:
+    val input
+
+    when:
+    fastadir = params.fasta_path
+    destdir = params.output_path
+    confStr = input[0].trim()
+    jsonS = new JsonSlurper()
+    confJson = jsonS.parseText(confStr)
+    genome_uuid = confJson.genome_uuid
+    File dest = new File("${destdir}/${genome_uuid}/seqs/cds.txt.zst")
+    File source = new File("${fastadir}/${genome_uuid}/cds.fa")
+    source.exists() and ! dest.exists()
+
+    script:
+    File infile =  new File("${fastadir}/${genome_uuid}/cds.fa")
+    File hashfile= new File("${destdir}/${genome_uuid}/cds.hashes")
+    File seqfile = new File("${destdir}/${genome_uuid}/seqs/cds.txt")
+    File zstfile = new File("${destdir}/${genome_uuid}/seqs/cds.txt.zst")
+    """
+    echo [DumpCDS] Dump CDS seq and calc checksum
+    perl ${params.script_path}/dump_from_fasta.pl --infile ${infile} --hashfile ${hashfile} --seqfile ${seqfile}
+    perl ${params.script_path}/compress.pl --infile ${seqfile} --outfile ${zstfile}
+    rm -f ${seqfile}
+    """
+}
+process DumpPEP {
+    /*
+      Description: Create pep.txt and pep.hashes files from fasta input
+    */
+    if (params.debug) {
+        debug params.debug
+        errorStrategy 'terminate'
+    }
+
+    label 'mem4GB'
+    tag 'dump_pep'
+
+    input:
+    val input
+
+    when:
+    fastadir = params.fasta_path
+    destdir = params.output_path
+    confStr = input[0].trim()
+    jsonS = new JsonSlurper()
+    confJson = jsonS.parseText(confStr)
+    genome_uuid = confJson.genome_uuid
+    File dest = new File("${destdir}/${genome_uuid}/seqs/pep.txt.zst")
+    File source = new File("${fastadir}/${genome_uuid}/pep.fa")
+    source.exists() and ! dest.exists()
+
+    script:
+    File infile =  new File("${fastadir}/${genome_uuid}/pep.fa")
+    File hashfile= new File("${destdir}/${genome_uuid}/pep.hashes")
+    File seqfile = new File("${destdir}/${genome_uuid}/seqs/pep.txt")
+    File zstfile = new File("${destdir}/${genome_uuid}/seqs/pep.txt.zst")
+    """
+    echo [DumpPEP] Dump PEP seq and calc checksum
+    perl ${params.script_path}/dump_from_fasta.pl --infile ${infile} --hashfile ${hashfile} --seqfile ${seqfile}
+    perl ${params.script_path}/compress.pl --infile ${seqfile} --outfile ${zstfile}
+    rm -f ${seqfile}
     """
 }
 

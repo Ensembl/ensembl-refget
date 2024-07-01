@@ -395,7 +395,7 @@ async def sequence(
             headers={"allow": "OPTIONS, GET, HEAD"},
         )
 
-    filename = os.path.join(SEQPATH, path, "seqs/seq.txt.zst")
+    filename = os.path.join(SEQPATH, path)
 
     if filename in CACHE:
         filehandle = CACHE[filename]

@@ -12,27 +12,36 @@ from pathlib import Path
 def add_data(db, basedir, dirname):
     print(f"DB insert for {dirname}")
 
-    infile = os.path.join(basedir, dirname, 'chrom.hashes')
-    if not os.path.isfile(infile):
-        print(f"Warning, missing file {infile}. Skipping.", file=sys.stderr)
-        return
+    for datatype in ['chrom', 'cdna', 'cds', 'pep']:
 
-    with open(infile, "rb") as file:
-        startpos = 0
-        for line in file:
-            name, md5, sha, _, length, _ = line.split(b"\t")
-            value = b"\t".join(
-                [
-                    dirname.encode('utf-8'),
-                    str(startpos).encode('utf-8'),
-                    length,
-                    name,
-                    md5
-                ]
-            )
-            db[md5] = sha
-            db[sha] = value
-            startpos += int(length.decode('utf-8'))
+        hashfile = f"{datatype}.hashes"
+        seqname = datatype
+        if seqname == 'chrom':
+            seqname = 'seq'
+
+        seqfile = f"{dirname}/seqs/{seqname}.txt.zst"
+
+        infile = os.path.join(basedir, dirname, hashfile)
+        if not os.path.isfile(infile):
+            print(f"Warning, missing file {infile}. Skipping.", file=sys.stderr)
+            continue
+
+        with open(infile, "rb") as file:
+            startpos = 0
+            for line in file:
+                name, md5, sha, _, length, _ = line.split(b"\t")
+                value = b"\t".join(
+                    [
+                        seqfile.encode('utf-8'),
+                        str(startpos).encode('utf-8'),
+                        length,
+                        name,
+                        md5
+                    ]
+                )
+                db[md5] = sha
+                db[sha] = value
+                startpos += int(length.decode('utf-8'))
 
 
 def main():
@@ -40,10 +49,13 @@ def main():
         description=(
             'This will build the main lookup index for a refget server.'
             ' By default, this will ingest data for all species / genomes available from'
-            ' <datadir>/genome_uuid_dir/chrom.hashes .'
+            ' <datadir>/genome_uuid_dir/{chrom,cdna,cds,pep}.hashes .'
         )
     )
     parser.add_argument("--datadir", help='Directory holding the data', required=True)
+
+    # If you use /dev/shm on Slurm, the RAM to hold the DB will be accounted to
+    # your process. You should allow for approx. 20GB per 100M entries.
     parser.add_argument("--dbfile",
         help=('Database file. Will be created if it does not exist.'
               ' It is recommended to create the DB in /dev/shm if available,'
@@ -55,12 +67,12 @@ def main():
     # that the hash will have. Ideally, this number should be larger than the
     # number of keys inserted. If there are more entries, keys will hash to the
     # same bucket and be stored in a linked list. Eventually, performance will
-    # deteriorate, so this should chosen to be large enough.
+    # deteriorate, so this should be chosen to be large enough.
     # If a DB grows over time to exceed the initial value, it should be rebuilt.
-    # That can be done on an existing database but that is not part of this
-    # script so far.
-    # This value is only applied when creating a database. When opening an
-    # existing DB, it does nothing.
+    # It's possible to rebuild an existing database. This is not currently part
+    # of this script.
+    # The dbsize option is only applied when creating a database. When opening
+    # an existing DB, it is ignored.
     parser.add_argument("--dbsize",
         help=(
             'Tunes the number of hash buckets for the DB. This should ideally be'
@@ -72,7 +84,11 @@ def main():
         type=int
     )
     parser.add_argument("select_dirs",
-        help='One or more directories to include, relative to datadir. Optional. Omit to select all directories.',
+        help=(
+            'One or more directories to include, relative to datadir.'
+            ' Optional. Omit to select all directories that look like a genome'
+            ' uuid.'
+        ),
         nargs='*'
     )
     args = parser.parse_args()
