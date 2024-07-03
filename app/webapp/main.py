@@ -254,6 +254,15 @@ async def root():
                     <a href="sequence/service-info">sequence/service-info</a>
                 </li>
                 <li>
+                    <a href="sequence/3129e478766bbbd904ed9825e4b82b5fbc98b20ba16d1e28">PEP ENSP00000426975.1 3129e47 1178 b</a>
+                </li>
+                <li>
+                    <a href="sequence/ee3d05dff4ed34cad1d1b5a359d11c91edfeac44952c8d48">CDS ENST00000511072.5 ee3d05d 3537 b</a>
+                </li>
+                <li>
+                    <a href="sequence/1085aeabd7922049ea428eea3ea65f6566111da51c30482c">CDNA ENST00000624431.2 1085aea 570 b</a>
+                </li>
+                <li>
                     <a href="sequence/2f52fa14ef0448864904d4ce4cf2bb1a766f25889ec0a2b4">2f52fa1, 13794 b</a>
                 </li>
                 <li>
@@ -333,10 +342,12 @@ async def sequence(
         # But for the range header, the end is inclusive, for refget, the end
         # parameter is exclusive. Make this match the parameter semantic.
         if end:
-            end = end + 1
+            end = int(end) + 1
 
     if start is None:
         start = 0
+    else:
+        start = int(start)
 
     # Treat nonsensical requests first
     if end:
