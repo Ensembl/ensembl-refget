@@ -38,13 +38,16 @@ def test_read_meta():
 def test_read_range():
     response = client.get("/sequence/2f52fa14ef0448864904d4ce4cf2bb1a766f25889ec0a2b4",
                headers={"Range": "bytes=0-99"})
+    # should be 206
     assert response.status_code == 200
     assert len(response.text) == 100
     response = client.get("/sequence/2f52fa14ef0448864904d4ce4cf2bb1a766f25889ec0a2b4",
                headers={"Range": "bytes=13794-"})
+    # should be 416
     assert response.status_code == 400
     response = client.get("/sequence/2f52fa14ef0448864904d4ce4cf2bb1a766f25889ec0a2b4",
                headers={"Range": "bytes=13694-"})
+    # should be 206
     assert response.status_code == 200
     assert len(response.text) == 100
     print(response.text)

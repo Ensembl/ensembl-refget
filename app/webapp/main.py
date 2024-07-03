@@ -441,7 +441,7 @@ async def metadata(qid: str) -> Metadata:
     if sha_id is None:
         raise HTTPException(status_code=404, detail="Sequence ID not found")
 
-    _, _, seqlength, name, md5_id = get_record(sha_id)
+    _, _, seqlength, _, md5_id = get_record(sha_id)
 
     ga4gh_id = sha_to_ga4gh(sha_id)
 
@@ -453,7 +453,6 @@ async def metadata(qid: str) -> Metadata:
             ga4gh=ga4gh_id,
             length=seqlength,
             aliases=[
-                Alias(naming_authority='ensembl', alias=name)
             ],
         )
     )
