@@ -1,10 +1,29 @@
-# ensembl-refget
+# A Refget server, implemented in Python
 
-# How to run
-    cd nginx-unit
-    python3.11 -m venv venv
-    . venv/bin/activate
-    pip install -r ../requirements.txt
-    export UNIT=$(docker run -d --mount type=bind,src=/mypath/nginx-unit,dst=/www/unit --mount type=bind,src=/mypath/data,dst=/www/unit/data -p 8001:8000 unit:1.32.1-python3.11)
-    docker exec -ti $UNIT curl -X PUT --data-binary @/www/unit/service.conf --unix-socket /var/run/control.unit.sock http://localhost/config
-    curl -X GET localhost:8001
+This is a REST API server, conforming to the
+[[https://samtools.github.io/hts-specs/refget.html][Refget spec]].
+It is implemented with Python and Fastapi.
+
+## How to run with Docker
+
+Two docker files are provided, one for nginx-unit and one for Uvicorn.
+Choose one, build the Docker image, then run it:
+
+    docker build --tag=refget-app .
+    docker run -it --mount type=bind,src=/anypath/,dst=/www/unit/data -p 8000:8000 refget-app:latest
+
+If data is mounted to a different path in the container, the env variables
+INDEXDBPATH and SEQPATH must be set accordingly.
+
+## Data
+
+This app expects data with this layout:
+
+    anypath/
+    anypath/indexdb.tkh
+    anypath/<genome_uuid>/
+    anypath/<genome_uuid>/seqs/
+    anypath/<genome_uuid>/seqs/seq.txt.zst
+    anypath/<genome_uuid>/seqs/cdna.txt.zst
+    anypath/<genome_uuid>/seqs/cds.txt.zst
+    anypath/<genome_uuid>/seqs/pep.txt.zst
