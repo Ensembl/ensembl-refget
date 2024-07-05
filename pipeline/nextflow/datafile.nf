@@ -233,7 +233,7 @@ process DumpCDNA {
         errorStrategy 'terminate'
     }
 
-    label 'mem4GB'
+    label 'mem1GB'
     tag 'dump_cdna'
 
     input:
@@ -271,7 +271,7 @@ process DumpCDS {
         errorStrategy 'terminate'
     }
 
-    label 'mem4GB'
+    label 'mem1GB'
     tag 'dump_cds'
 
     input:
@@ -309,7 +309,7 @@ process DumpPEP {
         errorStrategy 'terminate'
     }
 
-    label 'mem4GB'
+    label 'mem1GB'
     tag 'dump_pep'
 
     input:
