@@ -6,14 +6,18 @@ RUN set -ex \
 
 WORKDIR /www/uvicorn
 
-COPY app/requirements.txt /www/uvicorn/requirements.txt
+COPY api/requirements.txt /www/uvicorn/requirements.txt
 
 RUN pip install --no-cache-dir --upgrade -r /www/uvicorn/requirements.txt
 
-COPY app/webapp/ /www/uvicorn/app
+COPY api/src/refget /www/uvicorn/refget
 
-ENV PYTHONPATH=/usr/lib/python3/dist-packages/:/www/uvicorn/app/
+ENV PYTHONPATH=/usr/lib/python3/dist-packages/:/www/uvicorn/refget/
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "refget.main:app", \
+    "--host", "0.0.0.0", \
+    "--port", "8000", \
+    "--log-config", "refget/logconfig.yaml", \
+    "--workers", "2"]
 
 EXPOSE 8000
