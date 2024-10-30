@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ensembl_refget"
+version = "1.0.1"
+description = "A refget server"
+readme = "README.md"
+requires-python = ">= 3.10"
+
+# Also will need tkrzw-python which in turn will need the C++ library with a
+# matching version.
+# This is not currently found on pypi and needs to be installed separately
+# https://github.com/estraier/tkrzw, >= 1.0.27
+# https://github.com/estraier/tkrzw-python, >= 0.1.30
+dependencies = [
+  "fastapi[standard] >= 0.115.3",
+  "cachetools >= 5.3.3",
+  "indexed_zstd >= 1.6.1"
+]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+pythonpath = "src"
+log_cli = "true"
+
+[tool.mypy]
+mypy_path = "src/stubs"
+plugins = "pydantic.mypy"
