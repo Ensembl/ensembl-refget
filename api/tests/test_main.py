@@ -2,6 +2,8 @@ import os
 import refget
 import logging
 import hashlib
+import pytest
+from importlib import reload
 
 os.environ["INDEXDBPATH"] = "./testdata/indexdb.tkh"
 os.environ["SEQPATH"] = "./testdata/"
@@ -10,6 +12,25 @@ from fastapi.testclient import TestClient
 from refget.main import app
 
 client = TestClient(app)
+
+def checklog(caplog, level, match, loggername="uvicorn"):
+    assert caplog.records is not None and len(caplog.records) > 0
+
+    record = caplog.records.pop(0)
+    while record.name is not loggername and len(caplog.records) > 0:
+        record = caplog.records.pop(0)
+
+    assert record.levelname == level
+    assert match in record.message
+
+
+def test_lifecycle(caplog):
+    with TestClient(app) as client:
+        response = client.get("/")
+        assert response.status_code == 200
+    checklog(caplog, "INFO", "Logging configured. Refget version", "")
+    while len(caplog.records) > 0:
+        caplog.records.pop(0)
 
 
 def test_read_main():
@@ -39,16 +60,6 @@ def test_read_main():
         "version": refget.main.SERVICEVERSION,
     }
 
-
-def checklog(caplog, level, match, loggername="root"):
-    assert caplog.records is not None and len(caplog.records) > 0
-
-    record = caplog.records.pop(0)
-    while record.name is not loggername and len(caplog.records) > 0:
-        record = caplog.records.pop(0)
-
-    assert record.levelname == level
-    assert match in record.message
 
 
 # test seq is the (single) e.coli chromosome, length 4_641_652. Data:
@@ -315,3 +326,17 @@ def test_read_meta():
         "/sequence/024d0fa06f5ef897aad15f9bf6553aaf2664e178e1b5adc1/metadata"
     )
     assert response.status_code == 404
+
+def test_startup():
+    os.environ["INDEXDBPATH"] = "./testdata/no-db"
+    os.environ["SEQPATH"] = "./testdata/"
+
+    with pytest.raises(SystemExit):
+        reload(refget.main)
+        client = TestClient(app)
+
+    os.environ["INDEXDBPATH"] = "./testdata/indexdb.tkh"
+    os.environ["SEQPATH"] = "./no-data"
+    with pytest.raises(SystemExit):
+        reload(refget.main)
+        client = TestClient(app)

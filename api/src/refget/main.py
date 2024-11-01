@@ -529,7 +529,8 @@ async def sequence(
     if start > end:
         LOG.info("Invalid client query with start > end")
         raise HTTPException(
-            status_code=501, detail="Circular regions not currently supported"
+            status_code=501,
+            detail="Request has start > end, but circular regions are not currently supported",
         )
 
     seqstart += start
