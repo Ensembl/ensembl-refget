@@ -1,9 +1,10 @@
-
 # A Refget server, implemented in Python
 
 This is a REST API server, conforming to the
 [Refget specification](https://samtools.github.io/hts-specs/refget.html)
 It is implemented with Python and Fastapi.
+
+Please also see the README file for the refget app [here](api/README.md).
 
 ## How to run with Docker
 
