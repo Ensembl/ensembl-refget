@@ -8,6 +8,8 @@ binmode STDOUT, ':utf8';
 use Digest::MD5;
 use Digest::SHA;
 use Getopt::Long;
+use File::Basename;
+use File::Path qw(make_path);
 
 # This script prepares data for the refget server (ensembl-refget).
 # Reads in a multi-sequence fasta file (e.g. cdna.fa).
@@ -28,6 +30,9 @@ my $current;
 my $seq = undef;
 
 open (my $infh, '<', $infile) or die "Error opening input file '$infile': $!";
+my $seq_path = dirname($seqfile);
+# It's OK if zero dirs are created, so don't die
+make_path($seq_path);
 open (my $seqfh, '>', $seqfile) or die "Error opening sequence file '$seqfile': $!";
 open (my $hashfh, '>', $hashfile) or die "Error opening hash file '$hashfile': $!";
 

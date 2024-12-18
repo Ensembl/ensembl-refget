@@ -21,6 +21,10 @@ def helpAndDie() {
     --factory_path <PATH>
         Path to the metadata API species factory script
 
+    --factory_selector <STRING>
+        Specify what to select in the metadata DB. Example 'Processing
+        Submitted'. Remember to quote string in the shell.
+
     --dbconnection_file <PATH>
         Path to JSON file with DB config. Example:
         {
@@ -39,8 +43,9 @@ def helpAndDie() {
         Optional comma-separated list of genome_uuids. The pipeline will generate data for these species.
         Without the option, the default is to run for all species
 
-    --skipdone
-        If data for a step exists, skip the step instead of overwriting the data.
+    --release_id <ID>
+        Optional release_id. The pipeline will generate data for the species belonging to this release_id.
+        Without the option, the default is to run disregarding the release
 
     --help
         This text
@@ -64,11 +69,12 @@ def paramsOrDie() {
         'fasta_path',
         'script_path',
         'factory_path',
+        'factory_selector',
         'dbconnection_file',
         'metadatadb_key',
         'speciesdb_key',
         'genome_uuid',
-        'skipdone',
+        'release_id',
         'help',
         'debug'
     ]
@@ -86,13 +92,10 @@ def paramsOrDie() {
             params[i] = false
         }
     }
-    if (params.skipdone) {
-        params['skipdone'] = '--skipdone'
-    }
 
     for (i in [
         params.dbconnection_file, params.output_path, params.fasta_path, params.script_path, params.factory_path,
-        params.metadatadb_key, params.speciesdb_key
+        params.factory_selector, params.metadatadb_key, params.speciesdb_key
     ]) {
         if (! i?.trim()) {
             printErr("Missing required parameter")
@@ -129,7 +132,7 @@ println """\
          metadatadb_key: ${params.metadatadb_key}
          speciesdb_key: ${params.speciesdb_key}
          genome_uuid: ${params.genome_uuid}
-         skipdone: ${params.skipdone}
+         release_id: ${params.release_id}
          debug: ${params.debug}
          """
          .stripIndent()
@@ -171,15 +174,17 @@ process GenomeInfoProcess {
 
     script:
     g_uuid = params.genome_uuid ? "--genome_uuid " + convertToList(params.genome_uuid).join(" ") : ""
+    e_release_id = params.release_id ? "--release_id " + params.release_id : ""
 
     """
     python ${params.factory_path} \
         --metadata_db_uri ${dbconn} \
         --output genome_info.json \
         --batch_size 0 \
-        --dataset_status Processed Released \
+        --dataset_status ${params.factory_selector} \
         --dataset_type genebuild \
-        ${g_uuid}
+        ${g_uuid} \
+        ${e_release_id}
     """
 }
 
@@ -212,7 +217,6 @@ process DumpSequence {
     script:
     conf = input[0].trim()
     dbconn = input[1]
-
     File seqfile = new File("${destdir}/${genome_uuid}/seqs/seq.txt")
     File zstfile = new File("${destdir}/${genome_uuid}/seqs/seq.txt.zst")
     """
