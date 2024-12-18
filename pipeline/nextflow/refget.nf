@@ -89,7 +89,7 @@ def paramsOrDie() {
 
     for (i in allowedParams) {
         if (! params.containsKey(i)) {
-            params[i] = false
+            params[i] = ""
         }
     }
 
