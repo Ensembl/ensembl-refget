@@ -78,12 +78,14 @@ Run the pipeline like this:
 
     cd nextflow
 
-    nextflow datafile.nf -c config/datafile.config -profile slurm \
+    nextflow refget.nf -c config/refget.config -profile slurm \
     --factory_path $META_REPO_PATH/ensembl/production/metadata/api/factories/genomes.py \
     --output_path $OUTPUT_PATH/e2020-datafile-2024-03/ \
     --script_path $GIT_REPO_PATH/ensembl-e2020-datafiles/bin \
     --dbconnection_file $CONFIG_PATH/db-connection-secrets.json \
-    --metadatadb_key meta --speciesdb_key species
+    --metadatadb_key meta --speciesdb_key species \
+    --fasta_path $FASTA_PATH \
+    --factory_selector 'Processing Submitted'
 
 It accepts one or more genome uuids:
 
@@ -156,6 +158,7 @@ Clone required repo: [ensembl-e2020-datafiles](https://github.com/Ensembl/ensemb
     export BASE_CONFIG_DIR=$BASE_DIR/ensembl-e2020-datafiles/nextflow/config
     export NCD_BUILD_PATH=${NOBACKUP_DIR}/nextflow/datafile/ncd-tools
     export OUTPUT_PATH=${NOBACKUP_DIR}/nextflow/datafile/release_${ENS_VERSION}
+    export FASTA_PATH=/hps/nobackup/flicek/ensembl/production/ensembl_dumps/blast/
 
  Create Output Directory and nf workflow dir
 
@@ -164,20 +167,24 @@ Clone required repo: [ensembl-e2020-datafiles](https://github.com/Ensembl/ensemb
 
 
 ## Run all species, overwrite existing
-    nextflow datafile.nf -c config/datafile.config -profile slurm \
-    --factory_path $META_REPO_PATH/ensembl/production/metadata/api/factories/genomes.py \
-    --output_path $OUTPUT_PATH/e2020-datafile-2024-03/ \
-    --script_path $GIT_REPO_PATH/ensembl-e2020-datafiles/bin \
-    --dbconnection_file $CONFIG_PATH/db-connection-secrets.json \
-    --metadatadb_key meta --speciesdb_key species
-
-
-## Run specific genome UUIDs, skip existing
-    nextflow datafile.nf -c config/datafile.config -profile slurm \
+    nextflow refget.nf -c config/refget.config -profile slurm \
     --factory_path $META_REPO_PATH/ensembl/production/metadata/api/factories/genomes.py \
     --output_path $OUTPUT_PATH/e2020-datafile-2024-03/ \
     --script_path $GIT_REPO_PATH/ensembl-e2020-datafiles/bin \
     --dbconnection_file $CONFIG_PATH/db-connection-secrets.json \
     --metadatadb_key meta --speciesdb_key species \
-    --skipdone \
+    --fasta_path $FASTA_PATH \
+    --factory_selector 'Processing Submitted'
+
+
+## Run specific genome UUIDs, skip existing
+    nextflow refget.nf -c config/refget.config -profile slurm \
+    --factory_path $META_REPO_PATH/ensembl/production/metadata/api/factories/genomes.py \
+    --output_path $OUTPUT_PATH/e2020-datafile-2024-03/ \
+    --script_path $GIT_REPO_PATH/ensembl-e2020-datafiles/bin \
+    --dbconnection_file $CONFIG_PATH/db-connection-secrets.json \
+    --metadatadb_key meta --speciesdb_key species \
+    --fasta_path $FASTA_PATH \
+    --factory_selector 'Processing Submitted' \
     --genome_uuid a73357ab-93e7-11ec-a39d-005056b38ce3,96156567-3c9f-4305-a3be-eacdb5dc4353,4aaf041d-5ab0-41e8-acd6-0abcc2a51029
+

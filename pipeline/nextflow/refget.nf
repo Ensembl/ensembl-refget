@@ -14,6 +14,11 @@ def helpAndDie() {
     --output_path <PATH>
         Datafile output directory
 
+    --fasta_path <PATH>
+        Path to FASTA format data for CDS, CDNA and PEP. This is usually
+        produced by the production dump pipeline. 
+        Example: <path>/ensembl/production/ensembl_dumps/blast
+
     --script_path <PATH>
         Path to the bin folder of the ensembl-e2020-datafiles pipeline
         Example: <path>/ensembl-e2020-datafiles/bin/
