@@ -31,15 +31,15 @@ authors = [
 ]
 license = {text = "Apache License 2.0"}
 
-# Also will need tkrzw-python which in turn will need the C++ library with a
-# matching version.
-# This is not currently found on pypi and needs to be installed separately
+# Also will need the tkrzw C++ library with a matching version.
+# This needs to be installed separately, e.g.:
 # https://github.com/estraier/tkrzw, >= 1.0.27
 # https://github.com/estraier/tkrzw-python, >= 0.1.30
 dependencies = [
   "fastapi[standard] >= 0.115.3",
   "cachetools >= 5.3.3",
-  "indexed_zstd >= 1.6.1"
+  "indexed_zstd >= 1.6.1",
+  "git+https://github.com/estraier/tkrzw-python >= 0.1.30"
 ]
 
 [tool.pytest.ini_options]
