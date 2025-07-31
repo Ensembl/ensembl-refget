@@ -417,9 +417,7 @@ async def service_info() -> RefgetServiceInfo:
     Retrieve a RefgetServiceInfo describing the features this API deployment supports.
     """
     return RefgetServiceInfo(
-        refget=Refget(
-            circular_supported=True, algorithms=["md5", "ga4gh", "trunc512"]
-        ),
+        refget=Refget(circular_supported=True, algorithms=["md5", "ga4gh", "trunc512"]),
         id="refget.infra.ebi.ac.uk",
         name="Refget server",
         type=ServiceType(group="org.ga4gh", artifact="refget", version="2.0.0"),
