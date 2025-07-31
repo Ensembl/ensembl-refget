@@ -105,6 +105,9 @@ CHUNKSIZE = 128 * 1024
 # Version of this app. This is not the protocol version
 SERVICEVERSION = "1.0.1"
 
+# Refget media type
+REFGET_MEDIA_TYPE = "text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
+
 MOUNTPATH = config("MOUNTPATH", default="/")
 DEBUG: bool = config("DEBUG", cast=bool, default=False)
 
@@ -176,9 +179,11 @@ app.add_middleware(
 ################################################################################
 # Helper methods / functions
 ################################################################################
-async def read_zstd(file: IndexedZstdFile, requests: List[Tuple[int, int]]):
+
+
+async def multi_read_zstd(file: IndexedZstdFile, requests: List[Tuple[int, int]]):
     """
-    Read from zst compressed file in chunks, yield uncompressed data.
+    Read multiple regions from from zst compressed file in chunks, yield uncompressed data.
 
     Parameters
     ----------
@@ -191,54 +196,78 @@ async def read_zstd(file: IndexedZstdFile, requests: List[Tuple[int, int]]):
 
     Returns
     -------
-    Yields chunks as they are read
+    Yields uncompressed chunks as they are read. Requests are concatenated as a
+    single stream
     """
     for request in requests:
         start, length = request
-        LOG.debug("read_zstd: file=%s start=%s length=%s", file.name, start, length)
+        async for data in read_zstd(file, start, length):
+            yield data
 
-        chunkstart = 0
-        while chunkstart < length:
-            try:
-                file.seek(start + chunkstart)
-                readlen = CHUNKSIZE
-                if length - chunkstart < CHUNKSIZE:
-                    readlen = length - chunkstart
-                data = file.read(readlen)
-                if len(data) != readlen:
-                    LOG.error(
-                        (
-                            "Short read for: file=%s start=%s length=%s. "
-                            "Client may have received partial data"
-                        ),
-                        file.name,
-                        start,
-                        length,
-                    )
-                    # This is a streaming request. A 200 OK header has already been
-                    # sent, so there is no way of sending a 500 now. This is the best we
-                    # can do.
-                    yield "\n\nIO error. Sequence truncated.\n"
-                    break
 
-                chunkstart += readlen
-            except Exception as exc:
+async def read_zstd(file: IndexedZstdFile, start: int, length: int):
+    """
+    Read from zst compressed file in chunks, yield uncompressed data.
+
+    Parameters
+    ----------
+    file : IndexedZstdFile
+        zst compressed file to read
+
+    start : int
+        Starting position to read from
+
+    length : int
+        Length of the read
+
+    Returns
+    -------
+    Yields uncompressed chunks as they are read
+    """
+    LOG.debug("read_zstd: file=%s start=%s length=%s", file.name, start, length)
+
+    chunkstart = 0
+    while chunkstart < length:
+        try:
+            file.seek(start + chunkstart)
+            readlen = CHUNKSIZE
+            if length - chunkstart < CHUNKSIZE:
+                readlen = length - chunkstart
+            data = file.read(readlen)
+            if len(data) != readlen:
                 LOG.error(
                     (
-                        "Error reading sequence data: file=%s start=%s length=%s. "
+                        "Short read for: file=%s start=%s length=%s. "
                         "Client may have received partial data"
                     ),
                     file.name,
                     start,
                     length,
-                    exc_info=exc,
                 )
-                # Same as above, this is the best we can do.
+                # This is a streaming request. A 200 OK header has already been
+                # sent, so there is no way of sending a 500 now. This is the best we
                 # can do.
                 yield "\n\nIO error. Sequence truncated.\n"
                 break
 
-            yield data
+            chunkstart += readlen
+        except Exception as exc:
+            LOG.error(
+                (
+                    "Error reading sequence data: file=%s start=%s length=%s. "
+                    "Client may have received partial data"
+                ),
+                file.name,
+                start,
+                length,
+                exc_info=exc,
+            )
+            # Same as above, this is the best we can do.
+            # can do.
+            yield "\n\nIO error. Sequence truncated.\n"
+            break
+
+        yield data
 
 
 def get_record(qid: str) -> Tuple[str, int, int, str, str]:
@@ -517,9 +546,7 @@ async def sequence(
 
     # Treat nonsensical requests first
     if end and start == end:
-        return PlainTextResponse(
-            "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
-        )
+        return PlainTextResponse("", media_type=REFGET_MEDIA_TYPE)
 
     sha_id = id_to_sha(qid)
     if sha_id is None:
@@ -553,25 +580,23 @@ async def sequence(
         # End of 0 is a no-op
         if end != 0:
             regions.append((seqstart, end))
+        total_seqlength = sum(region[1] for region in regions)
     else:
         seqstart += start
         seqlength -= start
-
         end = end - start
         seqlength = min(seqlength, end)
         regions = [(seqstart, seqlength)]
+        total_seqlength = seqlength
 
-    total_seqlength = sum(region[1] for region in regions)
     if total_seqlength == 0:
-        return PlainTextResponse(
-            "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
-        )
+        return PlainTextResponse("", media_type=REFGET_MEDIA_TYPE)
 
     if request.method == "HEAD":
         return PlainTextResponse(
             content=None,
             headers={"content-length": str(total_seqlength)},
-            media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
+            media_type=REFGET_MEDIA_TYPE,
         )
     if request.method == "OPTIONS":
         return PlainTextResponse(
@@ -599,10 +624,13 @@ async def sequence(
             raise HTTPException(status_code=500, detail="Internal error. Bad data")
         CACHE[filename] = filehandle
 
-    return StreamingResponse(
-        read_zstd(filehandle, regions),
-        media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
-    )
+    if len(regions) > 1:
+        content = multi_read_zstd(filehandle, regions)
+    else:
+        start, length = regions[0]
+        content = read_zstd(filehandle, start, length)
+
+    return StreamingResponse(content, media_type=REFGET_MEDIA_TYPE)
 
 
 # sequence metadata
