@@ -1,15 +1,17 @@
 # A Refget server, implemented in Python
 
 This is a REST API server, conforming to the
-[Refget specification](https://samtools.github.io/hts-specs/refget.html)
-It is implemented with Python and Fastapi.
+[Refget specification](https://ga4gh.github.io/refget/sequences/)
+It is implemented with Python and FastAPI.
 
-Please also see the README file for the refget app [here](api/README.md).
+## Structure of the project
+- The [api](/api) folder contains the refget server implementation. See the README [here](api/README.md).
+- The [pipeline](/pipeline) folder contains the Nextflow pipeline for
+    provisioning data out of Ensembl. See the README [here](pipeline/README.md).
 
 ## How to run with Docker
 
-Two docker files are provided, one for nginx-unit and one for Uvicorn.
-Choose one, build the Docker image, then run it:
+Build the Docker image, then run it:
 
     docker build --tag=refget-app .
     docker run -it --mount type=bind,src=/anypath/,dst=/www/unit/data -p 8000:8000 refget-app:latest
@@ -29,3 +31,5 @@ This app expects data with this layout:
     anypath/<genome_uuid>/seqs/cdna.txt.zst
     anypath/<genome_uuid>/seqs/cds.txt.zst
     anypath/<genome_uuid>/seqs/pep.txt.zst
+
+

@@ -4,15 +4,13 @@ This repo contains a nextflow pipeline to prepare sequence data to serve
 by an API implementing the refget protocol in the context of the new Ensembl infrastructure.
 
 ## Structure of the project
-- [api](/api) folder contains the refget server implementation
-- [docker](/docker) contains Dockerfiles for images based on uvicorn and nginx
-- [pipeline](/pipeline) contains the Nextflow pipeline for provisioning data out of Ensembl
-  - Scripts are contained in the [bin](/bin) folder
-  - [indexer](/pipeline/indexer) folder contains a program to create an index of sequences
-  - [nextflow](/pipeline/nextflow) contains the Nextflow pipeline and related configuration
-  - Required dependencies are specified in `cpanfile` and `requirements.txt` for Perl and Python respectively
+- Scripts are contained in the [bin](bin) folder
+- Perl libraries are in the [lib](lib) folder
+- The [indexer](indexer) folder contains a program to create an index of sequences
+- The [nextflow](nextflow) folder contains the Nextflow pipeline and related configuration
+- Required dependencies are specified in `cpanfile` and `requirements.txt` for Perl and Python respectively
 
-## Requirements
+## Running the pipeline
 
 #### Codon software environment
 
@@ -66,7 +64,7 @@ Recommended set up:
 
 Running the nextflow pipeline will generate data for one or more genomes.
 Currently, the path to the `genomes.py` script from the Ensembl production
-metadata API must be provided (pls, see below).
+metadata API must be provided (please see below).
 
 A config file for the DB connections must be provided. It must be JSON and
 should look like this:
@@ -97,18 +95,16 @@ or
 
     --genome_uuid a73357ab-93e7-11ec-a39d-005056b38ce3,96156567-3c9f-4305-a3be-eacdb5dc4353,4aaf041d-5ab0-41e8-acd6-0abcc2a51029
 
-The option `--skipdone` will skip a step if the final output files for that step are present.
-
 Currently, the pipeline expects these environment variables to be set:
 
     $NOBACKUP_DIR : Work directory for the pipeline
 
 ### Information about individual scripts in 'pipeline'
 
-- *dump_sequence.pl* - TBC
-- *dump_from_fasta.pl* - TBC
-- *compress.pl* - TBC
-- *create_indexdb.py* - TBC
+- *bin/dump_sequence.pl* - Dumps sequence data out of a Core DB
+- *bin/dump_from_fasta.pl* - Copies data out of Fasta files
+- *bin/compress.pl* - Compresses files with a seekable ZSTD compression
+- *indexer/create_indexdb.py* - Creates the index key-value database
 
 ### Documentation
 
