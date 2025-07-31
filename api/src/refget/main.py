@@ -18,7 +18,7 @@ limitations under the License.
 from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path as OsPath
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from typing_extensions import Annotated
 import base64
 import binascii
@@ -176,12 +176,25 @@ app.add_middleware(
 ################################################################################
 # Helper methods / functions
 ################################################################################
-async def read_zstd(file: IndexedZstdFile, regions):
+async def read_zstd(file: IndexedZstdFile, requests: List[Tuple[int, int]]):
     """
     Read from zst compressed file in chunks, yield uncompressed data.
+
+    Parameters
+    ----------
+    file : IndexedZstdFile
+        zst compressed file to read
+
+    requests : List[Tuple[int,int]]
+        Each tuple represents where to start to read the compressed zst from and
+        length of the read. Both expressed in uncompressed positions
+
+    Returns
+    -------
+    Yields chunks as they are read
     """
-    for region in regions:
-        start, length = region
+    for request in requests:
+        start, length = request
         LOG.debug("read_zstd: file=%s start=%s length=%s", file.name, start, length)
 
         chunkstart = 0
@@ -490,7 +503,7 @@ async def sequence(
         # parameter is exclusive. Make this match the parameter semantic.
         if end is not None:
             end = end + 1
-        
+
         # Cannot support circular requests with range. But can only test this if start & end are defined
         if start and end and start > end:
             LOG.info("Invalid client query with start > end")
@@ -506,9 +519,9 @@ async def sequence(
 
     # Treat nonsensical requests first
     if end and start == end:
-            return PlainTextResponse(
-                "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
-            )
+        return PlainTextResponse(
+            "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
+        )
 
     sha_id = id_to_sha(qid)
     if sha_id is None:
@@ -535,10 +548,10 @@ async def sequence(
     # 1). start to sequence length
     # 2). 0 to end
     if start > end:
-        LOG.debug(f"Circular location detected: {start}-{end}. Splitting into two requests")
-        regions = [
-            ((seqstart+start), (seqlength-start))
-        ]
+        LOG.debug(
+            f"Circular location detected: {start}-{end}. Splitting into two requests"
+        )
+        regions = [((seqstart + start), (seqlength - start))]
         # End of 0 is a no-op
         if end != 0:
             regions.append((seqstart, end))
@@ -549,7 +562,7 @@ async def sequence(
         end = end - start
         seqlength = min(seqlength, end)
         regions = [(seqstart, seqlength)]
-    
+
     total_seqlength = sum(region[1] for region in regions)
     if total_seqlength == 0:
         return PlainTextResponse(
@@ -589,9 +602,6 @@ async def sequence(
         CACHE[filename] = filehandle
 
     return StreamingResponse(
-        # This is an async method which we call to stream this all back
-        # so we can either redo this method to support circular locations
-        # or call it multiple times
         read_zstd(filehandle, regions),
         media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
     )
