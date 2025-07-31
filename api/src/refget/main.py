@@ -176,54 +176,56 @@ app.add_middleware(
 ################################################################################
 # Helper methods / functions
 ################################################################################
-async def read_zstd(file: IndexedZstdFile, start: int, length: int):
+async def read_zstd(file: IndexedZstdFile, regions):
     """
     Read from zst compressed file in chunks, yield uncompressed data.
     """
-    LOG.debug("read_zstd: file=%s start=%s length=%s", file.name, start, length)
+    for region in regions:
+        start, length = region
+        LOG.debug("read_zstd: file=%s start=%s length=%s", file.name, start, length)
 
-    chunkstart = 0
-    while chunkstart < length:
-        try:
-            file.seek(start + chunkstart)
-            readlen = CHUNKSIZE
-            if length - chunkstart < CHUNKSIZE:
-                readlen = length - chunkstart
-            data = file.read(readlen)
-            if len(data) != readlen:
+        chunkstart = 0
+        while chunkstart < length:
+            try:
+                file.seek(start + chunkstart)
+                readlen = CHUNKSIZE
+                if length - chunkstart < CHUNKSIZE:
+                    readlen = length - chunkstart
+                data = file.read(readlen)
+                if len(data) != readlen:
+                    LOG.error(
+                        (
+                            "Short read for: file=%s start=%s length=%s. "
+                            "Client may have received partial data"
+                        ),
+                        file.name,
+                        start,
+                        length,
+                    )
+                    # This is a streaming request. A 200 OK header has already been
+                    # sent, so there is no way of sending a 500 now. This is the best we
+                    # can do.
+                    yield "\n\nIO error. Sequence truncated.\n"
+                    break
+
+                chunkstart += readlen
+            except Exception as exc:
                 LOG.error(
                     (
-                        "Short read for: file=%s start=%s length=%s. "
+                        "Error reading sequence data: file=%s start=%s length=%s. "
                         "Client may have received partial data"
                     ),
                     file.name,
                     start,
                     length,
+                    exc_info=exc,
                 )
-                # This is a streaming request. A 200 OK header has already been
-                # sent, so there is no way of sending a 500 now. This is the best we
+                # Same as above, this is the best we can do.
                 # can do.
                 yield "\n\nIO error. Sequence truncated.\n"
                 break
 
-            chunkstart += readlen
-        except Exception as exc:
-            LOG.error(
-                (
-                    "Error reading sequence data: file=%s start=%s length=%s. "
-                    "Client may have received partial data"
-                ),
-                file.name,
-                start,
-                length,
-                exc_info=exc,
-            )
-            # Same as above, this is the best we can do.
-            # can do.
-            yield "\n\nIO error. Sequence truncated.\n"
-            break
-
-        yield data
+            yield data
 
 
 def get_record(qid: str) -> Tuple[str, int, int, str, str]:
@@ -403,7 +405,7 @@ async def service_info() -> RefgetServiceInfo:
     """
     return RefgetServiceInfo(
         refget=Refget(
-            circular_supported=False, algorithms=["md5", "ga4gh", "trunc512"]
+            circular_supported=True, algorithms=["md5", "ga4gh", "trunc512"]
         ),
         id="refget.infra.ebi.ac.uk",
         name="Refget server",
@@ -488,6 +490,14 @@ async def sequence(
         # parameter is exclusive. Make this match the parameter semantic.
         if end is not None:
             end = end + 1
+        
+        # Cannot support circular requests with range. But can only test this if start & end are defined
+        if start and end and start > end:
+            LOG.info("Invalid client query with start > end")
+            raise HTTPException(
+                status_code=416,
+                detail="Range request has start > end. Circular requests not supported as a range header",
+            )
 
     if start is None:
         start = 0
@@ -495,14 +505,7 @@ async def sequence(
         start = int(start)
 
     # Treat nonsensical requests first
-    if end:
-        if start > end:
-            LOG.info("Invalid client query with start > end")
-            raise HTTPException(
-                status_code=501,
-                detail="Request has start > end, but circular regions are not currently supported",
-            )
-        if start == end:
+    if end and start == end:
             return PlainTextResponse(
                 "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
             )
@@ -526,19 +529,29 @@ async def sequence(
     if end is None:
         end = seqlength
 
+    # Refget encodes circular locations as start > end i.e. range goes through the
+    # ori. Since sequences are held linear we split region into two requests
+    #
+    # 1). start to sequence length
+    # 2). 0 to end
     if start > end:
-        LOG.info("Invalid client query with start > end")
-        raise HTTPException(
-            status_code=501,
-            detail="Request has start > end, but circular regions are not currently supported",
-        )
+        LOG.debug(f"Circular location detected: {start}-{end}. Splitting into two requests")
+        regions = [
+            ((seqstart+start), (seqlength-start))
+        ]
+        # End of 0 is a no-op
+        if end != 0:
+            regions.append((seqstart, end))
+    else:
+        seqstart += start
+        seqlength -= start
 
-    seqstart += start
-    seqlength -= start
-
-    end = end - start
-    seqlength = min(seqlength, end)
-    if seqlength == 0:
+        end = end - start
+        seqlength = min(seqlength, end)
+        regions = [(seqstart, seqlength)]
+    
+    total_seqlength = sum(region[1] for region in regions)
+    if total_seqlength == 0:
         return PlainTextResponse(
             "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
         )
@@ -546,7 +559,7 @@ async def sequence(
     if request.method == "HEAD":
         return PlainTextResponse(
             content=None,
-            headers={"content-length": str(seqlength)},
+            headers={"content-length": str(total_seqlength)},
             media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
         )
     if request.method == "OPTIONS":
@@ -576,7 +589,10 @@ async def sequence(
         CACHE[filename] = filehandle
 
     return StreamingResponse(
-        read_zstd(filehandle, seqstart, seqlength),
+        # This is an async method which we call to stream this all back
+        # so we can either redo this method to support circular locations
+        # or call it multiple times
+        read_zstd(filehandle, regions),
         media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
     )
 
