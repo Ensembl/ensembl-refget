@@ -28,6 +28,7 @@ from refget.main import app
 
 client = TestClient(app)
 
+
 def checklog(caplog, level, match, loggername="uvicorn"):
     assert caplog.records is not None and len(caplog.records) > 0
 
@@ -66,7 +67,7 @@ def test_read_main():
         "organization": {"name": "EMBL-EBI", "url": "https://ebi.ac.uk/"},
         "refget": {
             "algorithms": ["md5", "ga4gh", "trunc512"],
-            "circular_supported": False,
+            "circular_supported": True,
             "identifier_types": None,
             "subsequence_limit": None,
         },
@@ -74,7 +75,6 @@ def test_read_main():
         "updatedAt": None,
         "version": refget.main.SERVICEVERSION,
     }
-
 
 
 # test seq is the (single) e.coli chromosome, length 4_641_652. Data:
@@ -268,11 +268,29 @@ def test_read_range(caplog):
     assert len(response.text) == 9
     assert response.text == "GCTTTTCAT"
 
+    # Circular region test
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
-        params={"start": 400, "end": 10},
+        params={"start": 4641642, "end": 10},
     )
-    assert response.status_code == 501
+    assert response.text == "AGTATTTTTCAGCTTTTCAT"
+    assert len(response.text) == 20
+    assert response.status_code == 200
+    
+    response = client.get(
+        "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
+        params={"start": 4641642, "end": 0},
+    )
+    assert response.text == "AGTATTTTTC"
+    assert response.status_code == 200
+    
+    response = client.get(
+        "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
+        headers={"Range": "bytes=4641642-10"},
+    )
+    assert response.status_code == 416
+    
+    # End of circular region tests
 
     response = client.get(
         "/sequence/0b49cb6558b97aea58066cbb482c6790",
@@ -341,6 +359,7 @@ def test_read_meta():
         "/sequence/024d0fa06f5ef897aad15f9bf6553aaf2664e178e1b5adc1/metadata"
     )
     assert response.status_code == 404
+
 
 def test_startup():
     os.environ["INDEXDBPATH"] = "./testdata/no-db"

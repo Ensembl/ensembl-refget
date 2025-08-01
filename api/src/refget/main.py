@@ -18,7 +18,7 @@ limitations under the License.
 from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path as OsPath
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from typing_extensions import Annotated
 import base64
 import binascii
@@ -105,6 +105,9 @@ CHUNKSIZE = 128 * 1024
 # Version of this app. This is not the protocol version
 SERVICEVERSION = "1.0.1"
 
+# Refget media type
+REFGET_MEDIA_TYPE = "text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
+
 MOUNTPATH = config("MOUNTPATH", default="/")
 DEBUG: bool = config("DEBUG", cast=bool, default=False)
 
@@ -176,9 +179,50 @@ app.add_middleware(
 ################################################################################
 # Helper methods / functions
 ################################################################################
+
+
+async def multi_read_zstd(file: IndexedZstdFile, requests: List[Tuple[int, int]]):
+    """
+    Read multiple regions from from zst compressed file in chunks, yield uncompressed data.
+
+    Parameters
+    ----------
+    file : IndexedZstdFile
+        zst compressed file to read
+
+    requests : List[Tuple[int,int]]
+        Each tuple represents where to start to read the compressed zst from and
+        length of the read. Both expressed in uncompressed positions
+
+    Returns
+    -------
+    Yields uncompressed chunks as they are read. Requests are concatenated as a
+    single stream
+    """
+    for request in requests:
+        start, length = request
+        async for data in read_zstd(file, start, length):
+            yield data
+
+
 async def read_zstd(file: IndexedZstdFile, start: int, length: int):
     """
     Read from zst compressed file in chunks, yield uncompressed data.
+
+    Parameters
+    ----------
+    file : IndexedZstdFile
+        zst compressed file to read
+
+    start : int
+        Starting position to read from
+
+    length : int
+        Length of the read
+
+    Returns
+    -------
+    Yields uncompressed chunks as they are read
     """
     LOG.debug("read_zstd: file=%s start=%s length=%s", file.name, start, length)
 
@@ -402,9 +446,7 @@ async def service_info() -> RefgetServiceInfo:
     Retrieve a RefgetServiceInfo describing the features this API deployment supports.
     """
     return RefgetServiceInfo(
-        refget=Refget(
-            circular_supported=False, algorithms=["md5", "ga4gh", "trunc512"]
-        ),
+        refget=Refget(circular_supported=True, algorithms=["md5", "ga4gh", "trunc512"]),
         id="refget.infra.ebi.ac.uk",
         name="Refget server",
         type=ServiceType(group="org.ga4gh", artifact="refget", version="2.0.0"),
@@ -489,23 +531,22 @@ async def sequence(
         if end is not None:
             end = end + 1
 
+        # Cannot support circular requests with range. But can only test this if start & end are defined
+        if start and end and start > end:
+            LOG.info("Invalid client query with start > end")
+            raise HTTPException(
+                status_code=416,
+                detail="Range request has start > end. Circular requests not supported as a range header",
+            )
+
     if start is None:
         start = 0
     else:
         start = int(start)
 
     # Treat nonsensical requests first
-    if end:
-        if start > end:
-            LOG.info("Invalid client query with start > end")
-            raise HTTPException(
-                status_code=501,
-                detail="Request has start > end, but circular regions are not currently supported",
-            )
-        if start == end:
-            return PlainTextResponse(
-                "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
-            )
+    if end and start == end:
+        return PlainTextResponse("", media_type=REFGET_MEDIA_TYPE)
 
     sha_id = id_to_sha(qid)
     if sha_id is None:
@@ -526,28 +567,36 @@ async def sequence(
     if end is None:
         end = seqlength
 
+    # Refget encodes circular locations as start > end i.e. range goes through the
+    # ori. Since sequences are held linear we split region into two requests
+    #
+    # 1). start to sequence length
+    # 2). 0 to end
     if start > end:
-        LOG.info("Invalid client query with start > end")
-        raise HTTPException(
-            status_code=501,
-            detail="Request has start > end, but circular regions are not currently supported",
+        LOG.debug(
+            f"Circular location detected: {start}-{end}. Splitting into two requests"
         )
+        regions = [((seqstart + start), (seqlength - start))]
+        # End of 0 is a no-op
+        if end != 0:
+            regions.append((seqstart, end))
+        total_seqlength = sum(region[1] for region in regions)
+    else:
+        seqstart += start
+        seqlength -= start
+        end = end - start
+        seqlength = min(seqlength, end)
+        regions = [(seqstart, seqlength)]
+        total_seqlength = seqlength
 
-    seqstart += start
-    seqlength -= start
-
-    end = end - start
-    seqlength = min(seqlength, end)
-    if seqlength == 0:
-        return PlainTextResponse(
-            "", media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
-        )
+    if total_seqlength == 0:
+        return PlainTextResponse("", media_type=REFGET_MEDIA_TYPE)
 
     if request.method == "HEAD":
         return PlainTextResponse(
             content=None,
-            headers={"content-length": str(seqlength)},
-            media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
+            headers={"content-length": str(total_seqlength)},
+            media_type=REFGET_MEDIA_TYPE,
         )
     if request.method == "OPTIONS":
         return PlainTextResponse(
@@ -575,10 +624,13 @@ async def sequence(
             raise HTTPException(status_code=500, detail="Internal error. Bad data")
         CACHE[filename] = filehandle
 
-    return StreamingResponse(
-        read_zstd(filehandle, seqstart, seqlength),
-        media_type="text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii",
-    )
+    if len(regions) > 1:
+        content = multi_read_zstd(filehandle, regions)
+    else:
+        start, length = regions[0]
+        content = read_zstd(filehandle, start, length)
+
+    return StreamingResponse(content, media_type=REFGET_MEDIA_TYPE)
 
 
 # sequence metadata
