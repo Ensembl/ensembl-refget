@@ -28,12 +28,10 @@ from pathlib import Path
 def add_data(db, basedir, dirname):
     print(f"DB insert for {dirname}")
 
-    for datatype in ['chrom', 'cdna', 'cds', 'pep']:
+    for datatype in ['seq', 'cdna', 'cds', 'pep']:
 
         hashfile = f"{datatype}.hashes"
         seqname = datatype
-        if seqname == 'chrom':
-            seqname = 'seq'
 
         seqfile = f"{dirname}/seqs/{seqname}.txt.zst"
 
@@ -65,7 +63,7 @@ def main():
         description=(
             'This will build the main lookup index for a refget server.'
             ' By default, this will ingest data for all species / genomes available from'
-            ' <datadir>/genome_uuid_dir/{chrom,cdna,cds,pep}.hashes .'
+            ' <datadir>/genome_uuid_dir/{seq,cdna,cds,pep}.hashes .'
         )
     )
     parser.add_argument("--datadir", help='Directory holding the data', required=True)

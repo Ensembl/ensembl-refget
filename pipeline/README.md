@@ -18,14 +18,15 @@ Set up the environment like this:
 
     source /hps/software/users/ensembl/ensw/swenv/initenv default
 
+
+### Binaries
+
 > [!NOTE]
 > When using the new software environment on Codon, the dependencies are there,
 > this step can be skipped.
 
-### Binaries
-
 The following packages (Debian/Ubuntu) are required for building/installing the 
-other Perl and Python dependencies
+other Python dependencies
 
    sudo apt-get install pkg-config python3-dev default-libmysqlclient-dev \
         build-essential python3-tkrzw tkrzw-utils
@@ -34,18 +35,9 @@ For convenience, there is a script `setup-env.sh` that sets up the
 environment variables. You still have to install Python dependencies. If you choose
 different locations for the dependencies, please adapt this to your needs.
 
-> [!IMPORTANT]
-> The env variable `NOBACKUP_DIR` must be set to point to the `ensembl-refget` folder.
-> This is important because the variable is used by the Nextflow pipeline.
-> Also, `pipeline/bin` must be added to the PATH.
-> Other variables may be set as convenient.
-
 ### Perl
 
-To install the Perl dependencies manually, there is a `cpanfile` for the
-Perl requirements. Install with `cpanm --installdeps .` Recommended set up:
-
-    cpanm -l ~/perl5 --installdeps .
+Perl has no dependencies.
 
 ### Python
 There is a `requirements.txt` for the Python dependencies. Python >= 3.10 is required.
@@ -54,7 +46,7 @@ Recommended set up:
 #### Set up dependencies
 
     mkdir venv
-    python3 -m venv --system-site-packages venv
+    python3 -m venv venv
     . venv/bin/activate
     pip install -r requirements.txt
 
@@ -70,8 +62,7 @@ A config file for the DB connections must be provided. It must be JSON and
 should look like this:
 
     {
-    "meta" : "mysql://anonuser@metadata-host.ebi.ac.uk:1111/ensembl_genome_metadata",
-    "species" : "mysql://anonuser@species-host.ebi.ac.uk:1111/"
+    "meta" : "mysql://anonuser@metadata-host.ebi.ac.uk:1111/ensembl_genome_metadata"
     }
 
 Run the pipeline like this:
@@ -81,9 +72,9 @@ Run the pipeline like this:
     nextflow refget.nf -c config/refget.config -profile slurm \
     --factory_path $META_REPO_PATH/ensembl/production/metadata/api/factories/genomes.py \
     --output_path $OUTPUT_PATH \
-    --script_path $GIT_REPO_PATH/ensembl-e2020-datafiles/bin \
+    --script_path $GIT_REPO_PATH/ensembl-refget/bin \
     --dbconnection_file $CONFIG_PATH/db-connection-secrets.json \
-    --metadatadb_key meta --speciesdb_key species \
+    --metadatadb_key meta \
     --fasta_path $FASTA_PATH \
     --factory_selector 'Processing'
 
@@ -101,14 +92,10 @@ Currently, the pipeline expects these environment variables to be set:
 
 ### Information about individual scripts in 'pipeline'
 
-- *bin/dump_sequence.pl* - Dumps sequence data out of a Core DB
 - *bin/dump_from_fasta.pl* - Copies data out of Fasta files
 - *bin/compress.pl* - Compresses files with a seekable ZSTD compression
 - *indexer/create_indexdb.py* - Creates the index key-value database
 
-### Documentation
-
-TO DO
 
 # SOP
 
@@ -122,50 +109,51 @@ TO DO
 
 ## Clone required repo: [ensembl-refget](https://github.com/Ensembl/ensembl-refget/)
 
-    export BASE_DIR=/hps/software/users/ensembl/$TEAM/$USER
+    export BASE_DIR=~/refget-test
+    mkdir -p $BASE_DIR
     cd $BASE_DIR
-    git clone https://github.com/Ensembl/ensembl-refget/
+    git clone --depth 1 https://github.com/Ensembl/ensembl-refget/
 
 ## Install and activate py deps and set env variables used by nf pipeline
 
-    cd $BASE_DIR/ensembl-refget
-    python3 -m venv --system-site-packages venv
+    cd $BASE_DIR/ensembl-refget/pipeline
+    python3 -m venv venv
     . venv/bin/activate
     pip install -r requirements.txt
 
-    export NOBACKUP_DIR=/home/app/ensembl_production_apps/ensembl-refget/nextflow/data
-    export ENS_VERSION=113
-    export WORK_DIR=${NOBACKUP_DIR}/nextflow/datafile/work_dir
-    export BASE_DIR=/hps/software/users/ensembl/repositories/${USER}
-    export BASE_CONFIG_DIR=$BASE_DIR/ensembl-refget/nextflow/config
-    export OUTPUT_PATH=${NOBACKUP_DIR}/nextflow/datafile/release_${ENS_VERSION}
+    export NOBACKUP_DIR=/hps/nobackup/flicek/ensembl/production/ensembl_dumps/web/ensembl-refget/
+    export WORK_DIR=$BASE_DIR/work
+    export OUTPUT_PATH=$BASE_DIR/output
     export FASTA_PATH=/hps/nobackup/flicek/ensembl/production/ensembl_dumps/blast/
 
 ## Create Output Directory and nf workflow dir
 
-    cd ${NOBACKUP_DIR}/nextflow/datafile
+    cd $BASE_DIR/ensembl-refget/pipeline/nextflow
     mkdir -p $WORK_DIR
+    
+    export FACTORY_SCRIPT=$BASE_DIR/ensembl-refget/pipeline/venv/lib/python3.10/site-packages/ensembl/production/metadata/api/factories/genomes.py
 
 
 ## Run for all species
     nextflow refget.nf -c config/refget.config -profile slurm \
-    --factory_path $META_REPO_PATH/ensembl/production/metadata/api/factories/genomes.py \
+    --factory_path $FACTORY_SCRIPT \
     --output_path $OUTPUT_PATH \
-    --script_path $GIT_REPO_PATH/ensembl-refget/pipeline/bin \
-    --dbconnection_file $CONFIG_PATH/db-connection-secrets.json \
-    --metadatadb_key meta --speciesdb_key species \
+    --script_path $BASE_DIR/ensembl-refget/pipeline/bin \
+    --dbconnection_file $BASE_DIR/db-connection-secrets.json \
+    --metadatadb_key meta \
     --fasta_path $FASTA_PATH \
     --factory_selector 'Processing'
 
 
 ## Run for specific genome UUIDs
     nextflow refget.nf -c config/refget.config -profile slurm \
-    --factory_path $META_REPO_PATH/ensembl/production/metadata/api/factories/genomes.py \
+    --factory_path $FACTORY_SCRIPT \
     --output_path $OUTPUT_PATH \
-    --script_path $GIT_REPO_PATH/ensembl-e2020-datafiles/bin \
-    --dbconnection_file $CONFIG_PATH/db-connection-secrets.json \
-    --metadatadb_key meta --speciesdb_key species \
+    --script_path $BASE_DIR/ensembl-refget/pipeline/bin \
+    --dbconnection_file $BASE_DIR/db-connection-secrets.json \
+    --metadatadb_key meta \
     --fasta_path $FASTA_PATH \
+    --factory_selector 'Processing' \
     --genome_uuid a73357ab-93e7-11ec-a39d-005056b38ce3,96156567-3c9f-4305-a3be-eacdb5dc4353,4aaf041d-5ab0-41e8-acd6-0abcc2a51029
 
 > [!IMPORTANT]
