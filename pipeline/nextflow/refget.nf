@@ -40,9 +40,6 @@ def helpAndDie() {
     --metadatadb_key <Key>
         Key to the metadata DB config in the DB connection file (e.g. prod-1-meta)
 
-    --speciesdb_key <Key>
-        Key to the species DB config in the DB connection file (e.g. sta-6)
-
     Optional:
     --genome_uuid <UUID>
         Optional comma-separated list of genome_uuids. The pipeline will generate data for these species.
@@ -77,7 +74,6 @@ def paramsOrDie() {
         'factory_selector',
         'dbconnection_file',
         'metadatadb_key',
-        'speciesdb_key',
         'genome_uuid',
         'release_id',
         'help',
@@ -92,21 +88,36 @@ def paramsOrDie() {
         System.exit(1)
     }
 
-    for (i in allowedParams) {
-        if (! params.containsKey(i)) {
-            params[i] = ""
-        }
-    }
-
     for (i in [
-        params.dbconnection_file, params.output_path, params.fasta_path, params.script_path, params.factory_path,
-        params.factory_selector, params.metadatadb_key, params.speciesdb_key
+        "dbconnection_file", "output_path", "fasta_path", "script_path", "factory_path", "factory_selector", "metadatadb_key"
     ]) {
-        if (! i?.trim()) {
-            printErr("Missing required parameter")
+        if (! params.containsKey(i)) {
+            printErr("Missing required parameter ${i}")
+            helpAndDie()
+        }
+        if (! params.get(i)) {
+            printErr("Missing value for parameter ${i}")
             helpAndDie()
         }
     }
+
+    def jsonSlurper = new JsonSlurper()
+    def myConfig = jsonSlurper.parseText(new File(params.dbconnection_file).text)
+    def metadataDBConnStr = myConfig[params.metadatadb_key]
+
+    if (! metadataDBConnStr) {
+        printErr("Missing config entry for the metadata DB connection string in dbconnection_file")
+        helpAndDie()
+    }
+    params.metadataDBConnStr = metadataDBConnStr
+
+    if (! new File(params.factory_path).exists()) {
+        printErr("Factory script not found at path specified in factory_path parameter")
+        helpAndDie()
+    }
+
+    params.debug = params.containsKey('debug') ? params.get('debug') : false
+    params.release_id = params.containsKey('release_id') ? params.get('release_id') : false
 }
 
 def convertToList( userParam ){
@@ -135,10 +146,9 @@ println """\
          factory_path: ${params.factory_path}
          dbconnection_file: ${params.dbconnection_file}
          metadatadb_key: ${params.metadatadb_key}
-         speciesdb_key: ${params.speciesdb_key}
          genome_uuid: ${params.genome_uuid}
-         release_id: ${params.release_id}
-         debug: ${params.debug}
+         release_id: ${params.get('release_id')}
+         debug: ${params.get('debug')}
          """
          .stripIndent()
 
@@ -146,14 +156,8 @@ println """\
 workflow {
     params.help && helpAndDie()
 
-    def jsonSlurper = new JsonSlurper()
-    def myConfig = jsonSlurper.parseText(new File(params.dbconnection_file).text)
-    metadataDBConnStr = myConfig[params.metadatadb_key]
-    speciesDBConnStr = myConfig[params.speciesdb_key]
-
-    GenomeInfoProcess(metadataDBConnStr)
+    GenomeInfoProcess(params.metadataDBConnStr)
     | splitText
-    | combine(Channel.of(speciesDBConnStr))
     | ( DumpSequence & DumpCDNA & DumpCDS & DumpPEP)
 }
 
@@ -179,7 +183,7 @@ process GenomeInfoProcess {
 
     script:
     g_uuid = params.genome_uuid ? "--genome_uuid " + convertToList(params.genome_uuid).join(" ") : ""
-    e_release_id = params.release_id ? "--release_id " + params.release_id : ""
+    e_release_id = params.get('release_id') ? "--release_id " + params.release_id : ""
 
     """
     python ${params.factory_path} \
@@ -195,43 +199,42 @@ process GenomeInfoProcess {
 
 process DumpSequence {
     /*
-      Description: Builds the seq.txt and chrom.hashes files
+      Description: Create seq.txt and seq.hashes files from fasta input
     */
     if (params.debug) {
         debug params.debug
         errorStrategy 'terminate'
     }
 
-    // Currently, the wheat cultivars need around 26 GB of RAM. Most species
-    // need less than 3 GB.
-    label 'mem32GB'
-    tag 'dump_seq'
+    label 'mem1GB'
+    tag 'dump_sequence'
 
     input:
     val input
 
     when:
+    fastadir = params.fasta_path
     destdir = params.output_path
-    confStr = input[0].trim()
+    confStr = input.trim()
     jsonS = new JsonSlurper()
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
-    File file = new File("${destdir}/${genome_uuid}/seqs/seq.txt.zst")
-    ! file.exists()
+    File dest = new File("${destdir}/${genome_uuid}/seqs/seq.txt.zst")
+    File source = new File("${fastadir}/${genome_uuid}/unmasked.fa")
+    source.exists() and ! dest.exists()
 
     script:
-    conf = input[0].trim()
-    dbconn = input[1]
+    File infile =  new File("${fastadir}/${genome_uuid}/unmasked.fa")
+    File hashfile= new File("${destdir}/${genome_uuid}/seq.hashes")
     File seqfile = new File("${destdir}/${genome_uuid}/seqs/seq.txt")
     File zstfile = new File("${destdir}/${genome_uuid}/seqs/seq.txt.zst")
     """
     echo [DumpSequence] Dump seq and calc checksum
-    perl ${params.script_path}/dump_sequence.pl --conf '${conf}' --output ${params.output_path} --dbconn '${dbconn}'
+    perl ${params.script_path}/dump_from_fasta.pl --infile ${infile} --hashfile ${hashfile} --seqfile ${seqfile}
     perl ${params.script_path}/compress.pl --infile ${seqfile} --outfile ${zstfile}
     rm -f ${seqfile}
     """
 }
-
 
 process DumpCDNA {
     /*
@@ -251,7 +254,7 @@ process DumpCDNA {
     when:
     fastadir = params.fasta_path
     destdir = params.output_path
-    confStr = input[0].trim()
+    confStr = input.trim()
     jsonS = new JsonSlurper()
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
@@ -271,6 +274,7 @@ process DumpCDNA {
     rm -f ${seqfile}
     """
 }
+
 process DumpCDS {
     /*
       Description: Create cds.txt and cds.hashes files from fasta input
@@ -289,7 +293,7 @@ process DumpCDS {
     when:
     fastadir = params.fasta_path
     destdir = params.output_path
-    confStr = input[0].trim()
+    confStr = input.trim()
     jsonS = new JsonSlurper()
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
@@ -309,6 +313,7 @@ process DumpCDS {
     rm -f ${seqfile}
     """
 }
+
 process DumpPEP {
     /*
       Description: Create pep.txt and pep.hashes files from fasta input
@@ -327,7 +332,7 @@ process DumpPEP {
     when:
     fastadir = params.fasta_path
     destdir = params.output_path
-    confStr = input[0].trim()
+    confStr = input.trim()
     jsonS = new JsonSlurper()
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
