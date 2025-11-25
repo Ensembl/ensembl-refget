@@ -126,7 +126,6 @@ def main():
 
     print("DB open OK")
 
-    i = 0
     if select_dirs:
         dirs_to_index = [Path(datadir, dir) for dir in select_dirs]
     else:
