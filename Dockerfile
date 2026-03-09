@@ -1,23 +1,22 @@
-FROM python:3.11-bookworm
+FROM python:3.13-trixie
 
 RUN set -ex \
     && apt-get update \
     && apt-get install --no-install-recommends --no-install-suggests -y python3-tkrzw
 
-WORKDIR /www/uvicorn
+COPY . /www/uvicorn/
 
-COPY api/requirements.txt /www/uvicorn/requirements.txt
+WORKDIR /www/uvicorn/api
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir --upgrade -r /www/uvicorn/requirements.txt
+ENV PYTHONPATH=/usr/lib/python3/dist-packages/:/www/uvicorn/api/src/
 
-COPY api/src/refget /www/uvicorn/refget
+WORKDIR /www/uvicorn/api/src/refget
 
-ENV PYTHONPATH=/usr/lib/python3/dist-packages/:/www/uvicorn/refget/
-
-CMD ["uvicorn", "refget.main:app", \
+CMD ["uvicorn", "main:app", \
     "--host", "0.0.0.0", \
     "--port", "8000", \
-    "--log-config", "refget/logconfig.yaml", \
+    "--log-config", "logconfig.yaml", \
     "--workers", "2"]
 
 EXPOSE 8000
