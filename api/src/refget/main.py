@@ -110,6 +110,7 @@ REFGET_MEDIA_TYPE = "text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
 
 MOUNTPATH = config("MOUNTPATH", default="/")
 DEBUG: bool = config("DEBUG", cast=bool, default=False)
+ROOT_PATH = "" if MOUNTPATH == "/" else MOUNTPATH.rstrip("/")
 
 LOG = logging.getLogger()
 
@@ -153,8 +154,9 @@ app = FastAPI(
     contact={
         "name": "EMBL-EBI Genomics Technology Infrastructure",
         "email": "helpdesk@ensembl.org",
-        "url": "https://beta.ensembl.org/api/refget",
+        "url": "https://beta.ensembl.org/data/refget",
     },
+    root_path=ROOT_PATH,
     redoc_url=None,
     lifespan=lifespan,
 )
