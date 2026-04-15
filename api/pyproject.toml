@@ -33,13 +33,22 @@ license = {text = "Apache License 2.0"}
 
 # Also will need the tkrzw C++ library with a matching version.
 # This needs to be installed separately, e.g.:
-# https://github.com/estraier/tkrzw, >= 1.0.27
-# https://github.com/estraier/tkrzw-python, >= 0.1.30
+# apt-get install libtkrzw-dev
+# Tested with
+# https://github.com/estraier/tkrzw = 1.0.32
+# https://github.com/estraier/tkrzw-python, = 0.1.30
 dependencies = [
-  "fastapi[standard] >= 0.115.3",
-  "cachetools >= 5.3.3",
+  "fastapi[standard] >= 0.116.1",
+  "cachetools >= 6.1.0",
   "indexed_zstd >= 1.6.1",
-  "git+https://github.com/estraier/tkrzw-python >= 0.1.30"
+  "tkrzw@git+https://github.com/estraier/tkrzw-python.git@98c8c7b625266f0bddcd8c6e08c3d838381788c6"
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest",
+  "ruff",
+  "mypy",
 ]
 
 [tool.pytest.ini_options]

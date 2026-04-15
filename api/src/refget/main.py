@@ -103,13 +103,14 @@ DB.Open(
 CHUNKSIZE = 128 * 1024
 
 # Version of this app. This is not the protocol version
-SERVICEVERSION = "1.0.1"
+SERVICEVERSION = "1.0.2"
 
 # Refget media type
 REFGET_MEDIA_TYPE = "text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
 
 MOUNTPATH = config("MOUNTPATH", default="/")
 DEBUG: bool = config("DEBUG", cast=bool, default=False)
+ROOT_PATH = "" if MOUNTPATH == "/" else MOUNTPATH.rstrip("/")
 
 LOG = logging.getLogger()
 
@@ -153,11 +154,11 @@ app = FastAPI(
     contact={
         "name": "EMBL-EBI Genomics Technology Infrastructure",
         "email": "helpdesk@ensembl.org",
-        "url": "https://beta.ensembl.org/api/refget",
+        "url": "https://beta.ensembl.org/data/refget",
     },
+    root_path=ROOT_PATH,
     redoc_url=None,
     lifespan=lifespan,
-    openapi_url=str(OsPath(MOUNTPATH, "openapi.json")),
 )
 
 
@@ -394,29 +395,34 @@ def sha_to_ga4gh(sha_txt: str):
 # App logic
 ################################################################################
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-async def root():
+async def root(request: Request):
     """
     Return HTML for the index page.
     """
 
-    return HTMLResponse("""
-    <html>
-        <head>
-            <title>Refget Server</title>
-        </head>
-        <body>
-            <h1>Refget Server</h1>
+    root_path = request.scope.get("root_path") or "/"
+    root_path = root_path.rstrip("/")
+    doc_path = '/'.join((root_path, 'docs'))
 
-            This server offers reference sequence data according to the <b>Refget</b> protocol.
+    return HTMLResponse(f"""
+        <html>
+            <head>
+                <title>Refget Server</title>
+            </head>
+            <body>
+                <h1>Refget Server</h1>
 
-            <ul>
-                <li>
-                    <a href="docs">API documentation</a>
-                </li>
-            </ul>
-        </body>
-    </html>
-    """)
+                This server offers reference sequence data according to the <b>Refget</b> protocol.
+
+                <ul>
+                    <li>
+                        <a href="{doc_path}">API documentation</a>
+                    </li>
+                </ul>
+            </body>
+        </html>
+        """
+    )
 
 
 # Serve the favicon

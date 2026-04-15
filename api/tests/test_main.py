@@ -26,6 +26,7 @@ os.environ["SEQPATH"] = "./testdata/"
 from fastapi.testclient import TestClient
 from refget.main import app
 
+
 client = TestClient(app)
 
 
@@ -77,6 +78,7 @@ def test_read_main():
     }
 
 
+# Test reading a full sequence
 # test seq is the (single) e.coli chromosome, length 4_641_652. Data:
 # Chromosome  482a2b04485ec8c4b5f4eaba2c2002da    3638c7b68436818772d9156401904a51106257bc69fbc652        4641652
 def test_read_seq(caplog):
@@ -128,6 +130,7 @@ def test_read_seq(caplog):
     assert len(response.text) == 21
 
 
+# Test reading parts of a sequence with query parameters or the range header
 def test_read_range(caplog):
     caplog.set_level(logging.INFO)
 
@@ -202,6 +205,7 @@ def test_read_range(caplog):
     )
     assert response.status_code == 400
     checklog(caplog, "INFO", "Client sent invalid range header")
+
     # bad range spec
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
@@ -217,6 +221,7 @@ def test_read_range(caplog):
     )
     assert response.status_code == 400
     checklog(caplog, "INFO", "Client sent invalid range header")
+
     # bad range spec
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
@@ -241,9 +246,11 @@ def test_read_range(caplog):
     # should be 416, but again, spec forces 400
     assert response.status_code == 400
     checklog(caplog, "INFO", "Invalid client query with start > end of sequence")
+
     # remove https log message for next test
     checklog(caplog, "INFO", "400", "httpx")
 
+    # Set both range header and query params, status 400 as per spec
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
         params={"start": 0, "end": 10},
@@ -252,6 +259,7 @@ def test_read_range(caplog):
     assert response.status_code == 400
     checklog(caplog, "INFO", "Invalid client query with range and start/end")
 
+    # Read part of sequence starting from 0
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
         params={"start": 0, "end": 10},
@@ -260,6 +268,7 @@ def test_read_range(caplog):
     assert len(response.text) == 10
     assert response.text == "AGCTTTTCAT"
 
+    # Read part of sequence starting from 1
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
         params={"start": "1", "end": "10"},
@@ -268,7 +277,7 @@ def test_read_range(caplog):
     assert len(response.text) == 9
     assert response.text == "GCTTTTCAT"
 
-    # Circular region test
+    # Fetch circulcar region
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
         params={"start": 4641642, "end": 10},
@@ -276,28 +285,48 @@ def test_read_range(caplog):
     assert response.text == "AGTATTTTTCAGCTTTTCAT"
     assert len(response.text) == 20
     assert response.status_code == 200
-    
+
+    # Fetch circulcar region with end at 0
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
         params={"start": 4641642, "end": 0},
     )
     assert response.text == "AGTATTTTTC"
+    assert len(response.text) == 10
     assert response.status_code == 200
-    
+
+    # Even with circular regions, no negative indices
+    response = client.get(
+        "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
+        params={"start": -10, "end": 0},
+    )
+    assert response.status_code == 422
+
+    # Circular regions can not be fetched with a range header
     response = client.get(
         "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
         headers={"Range": "bytes=4641642-10"},
     )
     assert response.status_code == 416
-    
-    # End of circular region tests
 
+    # A range header with open end on a circular region should fetch up until
+    # the end
+    response = client.get(
+        "/sequence/482a2b04485ec8c4b5f4eaba2c2002da",
+        headers={"Range": "bytes=4641642-"},
+    )
+    assert response.text == "AGTATTTTTC"
+    assert len(response.text) == 10
+    assert response.status_code == 200
+
+    # Fetch with start and end outside sequence
     response = client.get(
         "/sequence/0b49cb6558b97aea58066cbb482c6790",
         params={"start": 400, "end": 410},
     )
     assert response.status_code == 400
 
+    # Legal fetch that omits start. Will fetch from 0
     response = client.get(
         "/sequence/0b49cb6558b97aea58066cbb482c6790",
         params={"end": 10},
@@ -306,6 +335,7 @@ def test_read_range(caplog):
     assert len(response.text) == 10
     assert response.text == "MKYINCVYNI"
 
+    # Fetch from start=10 to end
     response = client.get(
         "/sequence/0b49cb6558b97aea58066cbb482c6790",
         params={"start": 10},
@@ -314,6 +344,7 @@ def test_read_range(caplog):
     assert len(response.text) == 11
     assert response.text == "NYKLKPHSHYK"
 
+    # Verify MD5 checksum of full sequence matches ID
     response = client.get(
         "/sequence/0b49cb6558b97aea58066cbb482c6790",
     )
@@ -367,10 +398,8 @@ def test_startup():
 
     with pytest.raises(SystemExit):
         reload(refget.main)
-        client = TestClient(app)
 
     os.environ["INDEXDBPATH"] = "./testdata/indexdb.tkh"
     os.environ["SEQPATH"] = "./no-data"
     with pytest.raises(SystemExit):
         reload(refget.main)
-        client = TestClient(app)

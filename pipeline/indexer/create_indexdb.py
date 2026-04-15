@@ -133,9 +133,11 @@ def main():
 
     for file in dirs_to_index:
         if not file.is_dir():
+            print(f"Skipped {file}. Not a directory.", file=sys.stderr)
             continue
         dirname = file.name
         if not re.search(r'\w{8}-\w{4}-\w{4}-\w{4}-\w{12}', dirname):
+            print(f"Skipped {file}. Does not look like a UUID.", file=sys.stderr)
             continue
         add_data(db, datadir, dirname)
 

@@ -1,3 +1,16 @@
+# Installing
+
+    python3 -m venv venv
+    pip install -e .
+
+or, if you want the development dependencies
+
+    pip install -e . ensembl_refget[test]
+
+# Running
+
+    ./start.sh
+
 ## Env vars
 
 These env vars can be set and influence how refget works
@@ -16,6 +29,7 @@ can send a SIGHUP to the managing process and it will gracefully restart the
 workers and apply the new config.
 
 ### Run tests and linting
+
     Tests:
     pytest
     
