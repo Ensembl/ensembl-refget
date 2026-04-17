@@ -24,7 +24,7 @@ spec:
             path: /ifs/public/ro/enswbsites_codon
       containers:
         - name: ensembl-refget
-          image: DOCKER_IMAGE  # TODO: specify it in gitlab-ci.yaml
+          image: DOCKER_IMAGE
           imagePullPolicy: Always
           command:
             - uvicorn

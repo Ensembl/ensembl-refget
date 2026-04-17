@@ -1,3 +1,3 @@
 - op: replace
   path: /spec/rules/0/host
-  value: dev.ensembl.org
+  value: dev-2020.ensembl.org
