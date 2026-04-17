@@ -5,7 +5,7 @@ metadata:
 # This just for clarity here but this gets exposed via repo
 # https://gitlab.ebi.ac.uk/ensembl-web/newsite-api-config-setup 
 data:
-  INDEXDBPATH: <PATH TO indexdb.tkh FILE >
-  REPLICA_NO: "1" # TODO: update the deployment to use this variable
+  INDEXDBPATH: <PATH TO indexdb.tkh FILE >  # TODO: think of how to handle sensitive data like this one
+  REPLICA_NO: "1"
   SEQPATH: < PATH TO SEQUENCE DATA >
-  MOUNTPATH: /api/refget  # TODO: override this in public overlay to be /data/refget and update the deployment to use this variable as well
+  MOUNTPATH: /api/refget

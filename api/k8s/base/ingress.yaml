@@ -8,10 +8,10 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: beta.ensembl.org  # TODO: override this in dev and staging overlays and update the deployment to use this variable as well
+    - host: beta.ensembl.org
       http:
         paths:
-          - path: /api/refget($|/)(.*)  # TODO: override this in public overlay to be /data/refget and update the deployment to use this variable as well
+          - path: /api/refget($|/)(.*)
             pathType: ImplementationSpecific
             backend:
               service:
