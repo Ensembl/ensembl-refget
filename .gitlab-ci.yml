@@ -3,9 +3,12 @@ variables:
     CONTAINER_IMAGE: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
     # Required for docker:dind compatibility on shared runners.
     DOCKER_API_VERSION: "1.43"
+    DOCKER_IMAGE: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
+    BASE: k8s/base
 
 stages:
   - build
+  - deploy
 
 
 # Template to build to docker image
@@ -23,8 +26,35 @@ stages:
     - docker logout $CI_REGISTRY
 
 
-Docker-IMG:
+# Template to deploy application to k8s cluster
+.deploy:
+  stage: deploy
+  image: dockerhub.ebi.ac.uk/${CI_PROJECT_NAMESPACE}/deploy-tools:latest
+
+  before_script:
+    - kubectl config use-context ${AGENT}
+
+  script:
+    - cd ${BASE}
+    - kustomize edit set image DOCKER_IMAGE=${DOCKER_IMAGE}
+    - kustomize build . | kubectl apply -f -
+
+
+build:
   extends: 
     - .build
   variables:
     DOCKERFILE: Dockerfile
+
+
+dev:
+  extends: .deploy
+  variables:
+    BASE: k8s/web-prod/overlays/dev
+    AGENT: ${DEV_AGENT}
+  environment:
+    name: development
+  when: manual
+
+
+# TODO: set the deployment to be manual (for now)
