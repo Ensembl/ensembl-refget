@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ensembl-refget-deployment
+  labels:
+    ensembl.web.api.name: ensembl-refget
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      ensembl.web.api.name: ensembl-refget
+  template:
+    metadata:
+      labels:
+        ensembl.web.api.name: ensembl-refget
+    spec:
+      restartPolicy: Always
+      imagePullSecrets:
+        - name: ensemblweb-pull-secret
+      volumes:
+        - name: refget-data-vol
+          nfs:  # TODO: maybe we should consider fallback and overide it in the overlays
+            server: hh-isi-srv-vlan1496.ebi.ac.uk
+            path: /ifs/public/ro/enswbsites_codon
+      containers:
+        - name: ensembl-refget
+          image: DOCKER_IMAGE  # TODO: specify it in gitlab-ci.yaml
+          imagePullPolicy: Always
+          command:
+            - uvicorn
+          args:
+            - --host=0.0.0.0
+            - --port=8000
+            - refget.main:app
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: refget-configmap
+          volumeMounts:
+            - name: refget-data-vol
+              mountPath: /usr/data

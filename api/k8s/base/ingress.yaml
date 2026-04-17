@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ensembl-refget-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: beta.ensembl.org  # TODO: override this in dev and staging overlays and update the deployment to use this variable as well
+      http:
+        paths:
+          - path: /api/refget($|/)(.*)  # TODO: override this in public overlay to be /data/refget and update the deployment to use this variable as well
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: ensembl-refget-svc
+                port:
+                  number: 8000
