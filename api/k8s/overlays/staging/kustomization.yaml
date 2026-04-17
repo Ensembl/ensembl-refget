@@ -3,5 +3,19 @@ kind: Kustomization
 namespace: ensembl-stage
 resources:
 - ../../base
-
-
+patches:
+- target:
+    kind: Ingress
+    name: ensembl-refget-ingress
+  path: ingress-patch.yaml
+replacements:
+- source:
+    kind: ConfigMap
+    name: refget-configmap
+    fieldPath: data.REPLICA_NO
+  targets:
+  - select:
+      kind: Deployment
+      name: ensembl-refget-deployment
+    fieldPaths:
+    - spec.replicas

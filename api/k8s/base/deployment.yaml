@@ -5,7 +5,7 @@ metadata:
   labels:
     ensembl.web.api.name: ensembl-refget
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       ensembl.web.api.name: ensembl-refget
