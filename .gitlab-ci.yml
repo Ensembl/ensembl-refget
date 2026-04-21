@@ -50,7 +50,7 @@ build:
 dev:
   extends: .deploy
   variables:
-    BASE: k8s/web-prod/overlays/dev
+    BASE: k8s/overlays/dev
     AGENT: ${DEV_AGENT}
   environment:
     name: development
