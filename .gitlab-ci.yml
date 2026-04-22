@@ -35,8 +35,6 @@ stages:
     - kubectl config use-context ${AGENT}
 
   script:
-    - pwd
-    - ls -la
     - cd ${BASE}
     - kustomize edit set image DOCKER_IMAGE=${DOCKER_IMAGE}
     - kustomize build . | kubectl apply -f -
@@ -85,13 +83,11 @@ Public:
     name: public
   when: manual
 
-# Live:Fallback:
-#   extends: .deploy
-#   variables:
-#     BASE: k8s/overlays/prod
-#     AGENT: ${FALLBACK_AGENT}
-#   environment:
-#     name : fallback
-#   when: manual
-
-# TODO: set the deployment to be manual (for now)
+Live:Fallback:
+  extends: .deploy
+  variables:
+    BASE: k8s/overlays/prod
+    AGENT: ${FALLBACK_AGENT}
+  environment:
+    name : fallback
+  when: manual
