@@ -1,0 +1,6 @@
+- op: replace
+  path: /data/MOUNTPATH
+  value: /data/refget
+- op: replace
+  path: /data/REPLICA_NO
+  value: "3"

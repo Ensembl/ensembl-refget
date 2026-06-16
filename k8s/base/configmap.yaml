@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: refget-configmap
+# This just for clarity here but this gets exposed via repo
+# https://gitlab.ebi.ac.uk/ensembl-web/newsite-api-config-setup 
+data:
+  INDEXDBPATH: <PATH TO indexdb.tkh FILE >  # TODO: think of how to handle sensitive data like this one
+  REPLICA_NO: "1"
+  SEQPATH: < PATH TO SEQUENCE DATA >
+  MOUNTPATH: /api/refget

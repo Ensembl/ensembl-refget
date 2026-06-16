@@ -1,0 +1,6 @@
+- op: replace
+  path: /spec/template/spec/volumes/0/nfs/server
+  value: hx-isi-srv-vlan157.ebi.ac.uk
+- op: replace
+  path: /spec/template/spec/volumes/0/nfs/path
+  value: /ifs/public-r/ro/enswbsites_codon
