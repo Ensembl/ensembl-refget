@@ -283,7 +283,9 @@ def get_record(qid: str) -> Tuple[str, int, int, str, str]:
         LOG.info("ID not found: %s", qid)
         raise HTTPException(status_code=404, detail="Sequence ID not found")
     record = record_b.decode("utf-8")
-    [path, seqstart, seqlength, name, md5] = record.split("\t")
+    fields = record.split("\t")
+    path, seqstart, seqlength, name, md5 = fields[:5]
+    is_circular = fields[5].strip() == "1" if len(fields) > 5 else False
 
     if md5 is None:
         LOG.error("Invalid record in index DB. qid=%s record=%s", qid, record)
@@ -292,7 +294,7 @@ def get_record(qid: str) -> Tuple[str, int, int, str, str]:
     seqstart_i = int(seqstart)
     seqlength_i = int(seqlength)
 
-    return (path, seqstart_i, seqlength_i, name, md5)
+    return (path, seqstart_i, seqlength_i, name, md5, is_circular)
 
 
 def parse_range(range_raw_line: str) -> Tuple[int, int | None]:
@@ -560,7 +562,7 @@ async def sequence(
         raise HTTPException(status_code=404, detail="Sequence ID not found")
 
     # Fetch data
-    path, seqstart, seqlength, _, _ = get_record(sha_id)
+    path, seqstart, seqlength, _, _, is_circular = get_record(sha_id)
 
     # Treat range constraints
     if start >= seqlength:
@@ -579,6 +581,11 @@ async def sequence(
     # 1). start to sequence length
     # 2). 0 to end
     if start > end:
+        if not is_circular:
+            raise HTTPException(
+                status_code=416, detail="Requested range is not satisfiable for a linear sequence"
+            )
+
         LOG.debug(
             f"Circular location detected: {start}-{end}. Splitting into two requests"
         )
@@ -660,7 +667,7 @@ async def metadata(qid: str) -> Metadata:
         LOG.info("ID not found: %s", qid)
         raise HTTPException(status_code=404, detail="Sequence ID not found")
 
-    _, _, seqlength, _, md5_id = get_record(sha_id)
+    _, _, seqlength, _, md5_id, _ = get_record(sha_id)
 
     ga4gh_id = sha_to_ga4gh(sha_id)
 
