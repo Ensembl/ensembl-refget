@@ -271,7 +271,7 @@ async def read_zstd(file: IndexedZstdFile, start: int, length: int):
         yield data
 
 
-def get_record(qid: str) -> Tuple[str, int, int, str, str]:
+def get_record(qid: str) -> Tuple[str, int, int, str, str, bool]:
     """
     Do a lookup for a SHA (TRUNC512) query id in the index database.
     Returns a tuple containing the data for the entry.
