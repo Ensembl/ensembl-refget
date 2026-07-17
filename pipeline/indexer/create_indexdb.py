@@ -43,14 +43,18 @@ def add_data(db, basedir, dirname):
         with open(infile, "rb") as file:
             startpos = 0
             for line in file:
-                name, md5, sha, _, length, _ = line.split(b"\t")
+                name, md5, sha, _, length, circular = line.split(b"\t")
+
+                is_circular = b"1" if circular.strip() == b"1" else b"0"
+
                 value = b"\t".join(
                     [
                         seqfile.encode('utf-8'),
                         str(startpos).encode('utf-8'),
                         length,
                         name,
-                        md5
+                        md5,
+                        is_circular
                     ]
                 )
                 db[md5] = sha

@@ -49,6 +49,10 @@ def helpAndDie() {
         Optional release_id. The pipeline will generate data for the species belonging to this release_id.
         Without the option, the default is to run disregarding the release
 
+    --validate_checksums
+        Recalculate assembly sequence md5/SHA512 checksums from FASTA and compare
+        them with metadata DB values. By default, metadata checksums are trusted.
+
     --help
         This text
 
@@ -76,6 +80,7 @@ def paramsOrDie() {
         'metadatadb_key',
         'genome_uuid',
         'release_id',
+        'validate_checksums',
         'help',
         'debug'
     ]
@@ -118,6 +123,7 @@ def paramsOrDie() {
 
     params.debug = params.containsKey('debug') ? params.get('debug') : false
     params.release_id = params.containsKey('release_id') ? params.get('release_id') : false
+    params.validate_checksums = params.containsKey('validate_checksums') ? params.get('validate_checksums') : false
 }
 
 def convertToList( userParam ){
@@ -148,6 +154,7 @@ println """\
          metadatadb_key: ${params.metadatadb_key}
          genome_uuid: ${params.genome_uuid}
          release_id: ${params.get('release_id')}
+         validate_checksums: ${params.get('validate_checksums')}
          debug: ${params.get('debug')}
          """
          .stripIndent()
@@ -220,17 +227,21 @@ process DumpSequence {
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
     File dest = new File("${destdir}/${genome_uuid}/seqs/seq.txt.zst")
-    File source = new File("${fastadir}/${genome_uuid}/unmasked.fa")
-    source.exists() and ! dest.exists()
+    ! dest.exists()
 
     script:
     File infile =  new File("${fastadir}/${genome_uuid}/unmasked.fa")
+    if (! infile.exists()) {
+        error "Missing FASTA input for genome_uuid ${genome_uuid}: ${infile}"
+    }
     File hashfile= new File("${destdir}/${genome_uuid}/seq.hashes")
     File seqfile = new File("${destdir}/${genome_uuid}/seqs/seq.txt")
     File zstfile = new File("${destdir}/${genome_uuid}/seqs/seq.txt.zst")
+    metadata_dbconn = params.metadataDBConnStr
+    validate_checksums = params.validate_checksums ? "--validate_checksums" : ""
     """
-    echo [DumpSequence] Dump seq and calc checksum
-    perl ${params.script_path}/dump_from_fasta.pl --infile ${infile} --hashfile ${hashfile} --seqfile ${seqfile}
+    echo [DumpSequence] Dump seq, write checksums, and add circularity
+    perl ${params.script_path}/dump_refget_sequence.pl --genome_uuid ${genome_uuid} --metadata_dbconn ${metadata_dbconn} --infile ${infile} --hashfile ${hashfile} --seqfile ${seqfile} ${validate_checksums}
     perl ${params.script_path}/compress.pl --infile ${seqfile} --outfile ${zstfile}
     rm -f ${seqfile}
     """
@@ -259,11 +270,13 @@ process DumpCDNA {
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
     File dest = new File("${destdir}/${genome_uuid}/seqs/cdna.txt.zst")
-    File source = new File("${fastadir}/${genome_uuid}/cdna.fa")
-    source.exists() and ! dest.exists()
+    ! dest.exists()
 
     script:
     File infile =  new File("${fastadir}/${genome_uuid}/cdna.fa")
+    if (! infile.exists()) {
+        error "Missing FASTA input for genome_uuid ${genome_uuid}: ${infile}"
+    }
     File hashfile= new File("${destdir}/${genome_uuid}/cdna.hashes")
     File seqfile = new File("${destdir}/${genome_uuid}/seqs/cdna.txt")
     File zstfile = new File("${destdir}/${genome_uuid}/seqs/cdna.txt.zst")
@@ -298,11 +311,13 @@ process DumpCDS {
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
     File dest = new File("${destdir}/${genome_uuid}/seqs/cds.txt.zst")
-    File source = new File("${fastadir}/${genome_uuid}/cds.fa")
-    source.exists() and ! dest.exists()
+    ! dest.exists()
 
     script:
     File infile =  new File("${fastadir}/${genome_uuid}/cds.fa")
+    if (! infile.exists()) {
+        error "Missing FASTA input for genome_uuid ${genome_uuid}: ${infile}"
+    }
     File hashfile= new File("${destdir}/${genome_uuid}/cds.hashes")
     File seqfile = new File("${destdir}/${genome_uuid}/seqs/cds.txt")
     File zstfile = new File("${destdir}/${genome_uuid}/seqs/cds.txt.zst")
@@ -337,11 +352,13 @@ process DumpPEP {
     confJson = jsonS.parseText(confStr)
     genome_uuid = confJson.genome_uuid
     File dest = new File("${destdir}/${genome_uuid}/seqs/pep.txt.zst")
-    File source = new File("${fastadir}/${genome_uuid}/pep.fa")
-    source.exists() and ! dest.exists()
+    ! dest.exists()
 
     script:
     File infile =  new File("${fastadir}/${genome_uuid}/pep.fa")
+    if (! infile.exists()) {
+        error "Missing FASTA input for genome_uuid ${genome_uuid}: ${infile}"
+    }
     File hashfile= new File("${destdir}/${genome_uuid}/pep.hashes")
     File seqfile = new File("${destdir}/${genome_uuid}/seqs/pep.txt")
     File zstfile = new File("${destdir}/${genome_uuid}/seqs/pep.txt.zst")
@@ -352,4 +369,3 @@ process DumpPEP {
     rm -f ${seqfile}
     """
 }
-
