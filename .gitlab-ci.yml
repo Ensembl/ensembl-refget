@@ -86,7 +86,7 @@ Public:
 Live:Fallback:
   extends: .deploy
   variables:
-    BASE: k8s/overlays/prod
+    BASE: k8s/overlays/fallback
     AGENT: ${FALLBACK_AGENT}
   environment:
     name : fallback
