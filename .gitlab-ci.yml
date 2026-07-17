@@ -77,7 +77,7 @@ Live:
 Public:
   extends: .deploy
   variables:
-    BASE: k8s/overlays/public-graphql
+    BASE: k8s/overlays/public
     AGENT: ${PUBLIC_AGENT}
   environment:
     name: public
