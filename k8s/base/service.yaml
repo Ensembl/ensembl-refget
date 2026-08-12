@@ -9,6 +9,7 @@ spec:
   selector:
     ensembl.web.api.name: ensembl-refget
   ports:
-    - protocol: TCP
+    - name: refget
+      protocol: TCP
       port: 8000
       targetPort: 8000

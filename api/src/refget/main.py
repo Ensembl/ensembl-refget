@@ -33,6 +33,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from indexed_zstd import IndexedZstdFile
 from pydantic import Field, HttpUrl
+from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.config import Config
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse, PlainTextResponse, FileResponse
@@ -175,6 +176,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+Instrumentator(excluded_handlers=["/metrics"]).instrument(
+    app,
+    latency_lowr_buckets=(
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        1.25,
+        1.5,
+        1.75,
+        2,
+        2.5,
+        5,
+        10,
+        30,
+    ),
+).expose(app, include_in_schema=False)
 
 
 ################################################################################
