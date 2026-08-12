@@ -6,6 +6,9 @@ RUN set -ex \
 
 COPY . /www/uvicorn/
 
+ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-multiproc
+RUN mkdir -p /tmp/prometheus-multiproc
+
 WORKDIR /www/uvicorn/api
 RUN pip install --no-cache-dir -r requirements.txt
 
