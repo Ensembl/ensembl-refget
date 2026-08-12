@@ -155,7 +155,7 @@ app = FastAPI(
     contact={
         "name": "EMBL-EBI Genomics Technology Infrastructure",
         "email": "helpdesk@ensembl.org",
-        "url": "https://beta.ensembl.org/data/refget",
+        "url": "https://www.ensembl.org/data/refget",
     },
     root_path=ROOT_PATH,
     redoc_url=None,
