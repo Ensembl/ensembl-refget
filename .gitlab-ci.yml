@@ -1,18 +1,34 @@
+# include template to setup review app
+include:
+  - project: 'ensembl-web/ensembl-gitlab-ci-templates'
+    ref: 'main'
+    file:
+      - 'branch-rules/.branch-rules-template.yaml'
+      - 'deploy/.deploy-main-template.yaml'
+      - 'deploy/.deploy-review-template.yaml'
+      - 'review/.setup-BE-review-template.yaml'
+      - 'security-scan/.ensembl-security-jobs.yaml'
+
 variables:
     DOCKER_TLS_CERTDIR: ""
-    CONTAINER_IMAGE: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
     # Required for docker:dind compatibility on shared runners.
     DOCKER_API_VERSION: "1.43"
     DOCKER_IMAGE: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
-    BASE: k8s/base
+    NFS_SERVER: ${HL_NFS_SERVER_CODON}
+    NFS_PATH: ${HL_NFS_PATH_CODON}
 
 stages:
+  - security-scan
+  - setup
   - build
-  - deploy
-
+  - container-scan
+  - deploy-review
+  - deploy-test
+  - deploy-stage
+  - deploy-prod
 
 # Template to build to docker image
-.build:
+Docker:
   stage: build
   image: docker
   services:
@@ -20,74 +36,90 @@ stages:
   before_script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
-    - docker build -t ${CONTAINER_IMAGE} --no-cache .
-    - docker push ${CONTAINER_IMAGE}
-    - docker rmi ${CONTAINER_IMAGE}
+    - docker build -t ${DOCKER_IMAGE} --no-cache .
+    - docker push ${DOCKER_IMAGE}
+    - docker rmi ${DOCKER_IMAGE}
     - docker logout $CI_REGISTRY
 
-
-# Template to deploy application to k8s cluster
-.deploy:
-  stage: deploy
-  image: dockerhub.ebi.ac.uk/${CI_PROJECT_NAMESPACE}/deploy-tools:latest
-
-  before_script:
-    - kubectl config use-context ${AGENT}
-
-  script:
-    - cd ${BASE}
-    - kustomize edit set image DOCKER_IMAGE=${DOCKER_IMAGE}
-    - kustomize build . | kubectl apply -f -
-
-
-build:
-  extends: 
-    - .build
-  variables:
-    DOCKERFILE: Dockerfile
-
-
-Dev:
-  extends: .deploy
-  variables:
-    BASE: k8s/overlays/dev
-    AGENT: ${DEV_AGENT}
+# Jobs extended from templates to setup and deploy review environment, dev, staging, prod and fallback environments
+# Create a review deployment (runs once per new branch)
+Setup Review:
+  extends: .setup-review-newk8s
+  stage: setup
   environment:
     name: development
-  when: manual
-
-Staging:
-  extends: .deploy
   variables:
-    BASE: k8s/overlays/staging
-    AGENT: ${STAGING_AGENT}
+    GIT_STRATEGY: none
+    AGENT: ${DEV_AGENT}
+    DEV_NS: ${DEV_NS}
+    REVIEW_NS: ${CI_COMMIT_REF_SLUG}
+    BE_INGRESS: ensembl-refget-ingress-${CI_COMMIT_REF_SLUG}
+
+# Deploy review environment
+Deploy Review:
+  extends: .deploy-review
+  stage: deploy-review
+  variables:
+    AGENT: ${DEV_AGENT}
+    REVIEW_NS: ${CI_COMMIT_REF_SLUG}
+  environment:
+    url: https://${REVIEW_NS}.review.ensembl.org
+    on_stop: Stop Review
+
+Stop Review:
+  extends: .stop-review
+  stage: deploy-review
+  variables:
+    # Must match deploy-review; its job variables are not inherited here.
+    AGENT: ${DEV_AGENT}
+    REVIEW_NS: ${CI_COMMIT_REF_SLUG}
+    GIT_STRATEGY: none
+  rules:
+    - if: $CI_DEPLOY_FREEZE == null && $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH != "dev"
+      when: manual
+      allow_failure: true
+  environment:
+    action: stop
+
+# Deploy Dev
+Dev:
+  stage: deploy-test
+  extends: .deploy-main
+  environment:
+    name: development
+  variables:
+    AGENT: ${DEV_AGENT}
+    NS: ${DEV_NS}
+
+# Deploy Stage
+Staging:
+  stage: deploy-stage
+  extends: .deploy-main
   environment:
     name: staging
-  when: manual
-
-Live:
-  extends: .deploy
   variables:
-    BASE: k8s/overlays/prod
+    AGENT: ${STAGING_AGENT}
+    NS: ${STAGING_NS}
+
+#Deploy prod & fallback environment
+Prod:
+  stage: deploy-prod
+  extends: .deploy-main
+  environment:
+    name: production
+  when: manual
+  variables:
     AGENT: ${PROD_AGENT}
-  environment:
-    name : production
-  when: manual
+    NS: ${PROD_NS}
 
-Public:
-  extends: .deploy
-  variables:
-    BASE: k8s/overlays/public
-    AGENT: ${PUBLIC_AGENT}
+Fallback:
+  stage: deploy-prod
+  extends: .deploy-main
   environment:
-    name: public
+    name: fallback
   when: manual
-
-Live:Fallback:
-  extends: .deploy
   variables:
-    BASE: k8s/overlays/fallback
     AGENT: ${FALLBACK_AGENT}
-  environment:
-    name : fallback
-  when: manual
+    NS: ${FALLBACK_NS}
+    NFS_SERVER: ${HX_NFS_SERVER_CODON}
+    NFS_PATH: ${HX_NFS_PATH_CODON}
