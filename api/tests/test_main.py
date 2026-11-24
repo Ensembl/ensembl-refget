@@ -30,6 +30,20 @@ from refget.main import app
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def mark_test_chromosome_circular(monkeypatch):
+    """The bundled chromosome is used by the suite as its circular fixture."""
+    original_get_record = refget.main.get_record
+
+    def get_record_with_circular_chromosome(qid):
+        record = original_get_record(qid)
+        if record[4] == "482a2b04485ec8c4b5f4eaba2c2002da":
+            return (*record[:5], True)
+        return record
+
+    monkeypatch.setattr(refget.main, "get_record", get_record_with_circular_chromosome)
+
+
 def checklog(caplog, level, match, loggername="uvicorn"):
     assert caplog.records is not None and len(caplog.records) > 0
 
@@ -354,6 +368,114 @@ def test_read_range(caplog):
         hashlib.md5(response.text.encode("utf-8")).hexdigest()
         == "0b49cb6558b97aea58066cbb482c6790"
     )
+
+
+@pytest.mark.parametrize(
+    ("params", "expected_length"),
+    [
+        ({"start": 4640704, "end": 4641902}, 1198),
+        ({"start": 4641103, "end": 4641892}, 789),
+        ({"start": 4641103, "end": 240}, 789),
+        ({"start": 4640704, "end": 4641652}, 948),
+        ({"end": 240}, 240),
+    ],
+)
+def test_circular_ranges_across_origin(params, expected_length):
+    sequence_id = "482a2b04485ec8c4b5f4eaba2c2002da"
+    sequence_length = 4641652
+    start = params.get("start", 0)
+    end = params["end"]
+
+    response = client.get(f"/sequence/{sequence_id}", params=params)
+
+    assert response.status_code == 200
+    assert len(response.text) == expected_length
+
+    if end > sequence_length or start > end:
+        wrapped_end = end % sequence_length
+        tail = client.get(
+            f"/sequence/{sequence_id}",
+            params={"start": start, "end": sequence_length},
+        )
+        head = client.get(
+            f"/sequence/{sequence_id}", params={"start": 0, "end": wrapped_end}
+        )
+        assert response.text == tail.text + head.text
+
+
+@pytest.mark.parametrize(
+    ("coordinate", "value"),
+    [
+        ("start", "-1"),
+        ("end", "-1"),
+        ("start", "1.5"),
+        ("end", "1.0"),
+        ("start", "abc"),
+        ("end", "4294967296"),
+    ],
+)
+def test_malformed_coordinates_return_400(coordinate, value):
+    response = client.get(
+        "/sequence/0b49cb6558b97aea58066cbb482c6790",
+        params={coordinate: value},
+    )
+    assert response.status_code == 400
+
+
+def test_range_coordinate_exceeding_uint32_returns_400():
+    response = client.get(
+        "/sequence/0b49cb6558b97aea58066cbb482c6790",
+        headers={"Range": "bytes=0-4294967296"},
+    )
+    assert response.status_code == 400
+
+
+def test_explicit_zero_coordinate_conflicts_with_range_header():
+    response = client.get(
+        "/sequence/0b49cb6558b97aea58066cbb482c6790",
+        params={"start": 0},
+        headers={"Range": "bytes=0-1"},
+    )
+    assert response.status_code == 400
+
+
+def test_unknown_identifier_is_checked_before_empty_range():
+    response = client.get(
+        "/sequence/00000000000000000000000000000000",
+        params={"start": 10, "end": 10},
+    )
+    assert response.status_code == 404
+
+
+def test_equal_coordinates_at_sequence_boundary_return_empty_sequence():
+    response = client.get(
+        "/sequence/0b49cb6558b97aea58066cbb482c6790",
+        params={"start": 21, "end": 21},
+    )
+    assert response.status_code == 200
+    assert response.text == ""
+
+
+def test_start_beyond_sequence_returns_400():
+    response = client.get(
+        "/sequence/0b49cb6558b97aea58066cbb482c6790",
+        params={"start": 22},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"start": 0, "end": 22},
+        {"start": 10, "end": 5},
+    ],
+)
+def test_unsatisfiable_linear_ranges_return_416(params):
+    response = client.get(
+        "/sequence/0b49cb6558b97aea58066cbb482c6790", params=params
+    )
+    assert response.status_code == 416
 
 
 def test_read_meta():

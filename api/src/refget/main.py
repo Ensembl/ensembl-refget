@@ -29,14 +29,21 @@ import resource
 
 from cachetools import LFUCache
 from fastapi import FastAPI, Header, HTTPException, Request, Path
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from indexed_zstd import IndexedZstdFile
-from pydantic import Field, HttpUrl
+from pydantic import BeforeValidator, HttpUrl
 from prometheus_fastapi_instrumentator import Instrumentator
 from starlette.config import Config
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import StreamingResponse, PlainTextResponse, FileResponse
+from starlette.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 import tkrzw
 import uvicorn
 
@@ -108,6 +115,20 @@ SERVICEVERSION = "1.0.2"
 
 # Refget media type
 REFGET_MEDIA_TYPE = "text/vnd.ga4gh.refget.v2.0.0+plain; charset=us-ascii"
+MAX_COORDINATE = (2**32) - 1
+
+
+def validate_coordinate(value: object) -> int:
+    """Parse an unsigned 32-bit integer without accepting numeric coercions."""
+    if not isinstance(value, str) or re.fullmatch(r"\d+", value) is None:
+        raise ValueError("Coordinate must be an unsigned integer")
+    coordinate = int(value)
+    if coordinate > MAX_COORDINATE:
+        raise ValueError("Coordinate exceeds the unsigned 32-bit limit")
+    return coordinate
+
+
+Coordinate = Annotated[int, BeforeValidator(validate_coordinate)]
 
 MOUNTPATH = config("MOUNTPATH", default="/")
 DEBUG: bool = config("DEBUG", cast=bool, default=False)
@@ -161,6 +182,16 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Refget reports malformed request parameters as 400, rather than 422."""
+    return JSONResponse(
+        status_code=400, content={"detail": jsonable_encoder(exc.errors())}
+    )
 
 
 ################################################################################
@@ -349,6 +380,10 @@ def parse_range(range_raw_line: str) -> Tuple[int, int | None]:
     if matches[2] is not None:
         end = int(matches[2])
 
+    if start > MAX_COORDINATE or (end is not None and end > MAX_COORDINATE):
+        LOG.info("Client sent range coordinate exceeding uint32: %s", range_raw_line)
+        raise HTTPException(status_code=400, detail="Range coordinate exceeds limit")
+
     return (start, end)
 
 
@@ -426,7 +461,7 @@ async def root(request: Request):
 
     root_path = request.scope.get("root_path") or "/"
     root_path = root_path.rstrip("/")
-    doc_path = '/'.join((root_path, 'docs'))
+    doc_path = "/".join((root_path, "docs"))
 
     return HTMLResponse(f"""
         <html>
@@ -445,8 +480,7 @@ async def root(request: Request):
                 </ul>
             </body>
         </html>
-        """
-    )
+        """)
 
 
 # Serve the favicon
@@ -526,8 +560,8 @@ async def sequence(
             },
         },
     ),
-    start: Optional[Annotated[int, Field(ge=0)]] = None,
-    end: Optional[Annotated[int, Field(ge=0)]] = None,
+    start: Optional[Coordinate] = None,
+    end: Optional[Coordinate] = None,
     range_header: Optional[str] = Header(None, alias="Range"),
 ) -> StreamingResponse | PlainTextResponse:
     """
@@ -547,7 +581,7 @@ async def sequence(
     # 501: not implemented
 
     if range_header:
-        if start or end:
+        if start is not None or end is not None:
             LOG.info("Invalid client query with range and start/end")
             raise HTTPException(
                 status_code=400,
@@ -571,12 +605,6 @@ async def sequence(
 
     if start is None:
         start = 0
-    else:
-        start = int(start)
-
-    # Treat nonsensical requests first
-    if end and start == end:
-        return PlainTextResponse("", media_type=REFGET_MEDIA_TYPE)
 
     sha_id = id_to_sha(qid)
     if sha_id is None:
@@ -587,7 +615,7 @@ async def sequence(
     path, seqstart, seqlength, _, _, is_circular = get_record(sha_id)
 
     # Treat range constraints
-    if start >= seqlength:
+    if start > seqlength:
         LOG.info("Invalid client query with start > end of sequence")
         # Should be 422, but spec forces 400
         raise HTTPException(
@@ -597,24 +625,37 @@ async def sequence(
     if end is None:
         end = seqlength
 
+    # Validate the identifier and coordinate bounds before returning an empty range.
+    if start == end:
+        return PlainTextResponse("", media_type=REFGET_MEDIA_TYPE)
+
+    if (
+        range_header is None
+        and not is_circular
+        and (end > seqlength or start > end)
+    ):
+        raise HTTPException(
+            status_code=416,
+            detail="Requested range is not satisfiable for a linear sequence",
+        )
+
     # Refget encodes circular locations as start > end i.e. range goes through the
     # ori. Since sequences are held linear we split region into two requests
     #
     # 1). start to sequence length
     # 2). 0 to end
-    if start > end:
+    if start > end or (is_circular and range_header is None and end > seqlength):
         if not is_circular:
             raise HTTPException(
-                status_code=416, detail="Requested range is not satisfiable for a linear sequence"
+                status_code=416,
+                detail="Requested range is not satisfiable for a linear sequence",
             )
 
-        LOG.debug(
-            f"Circular location detected: {start}-{end}. Splitting into two requests"
-        )
+        wrapped_end = end % seqlength
         regions = [((seqstart + start), (seqlength - start))]
         # End of 0 is a no-op
-        if end != 0:
-            regions.append((seqstart, end))
+        if wrapped_end != 0:
+            regions.append((seqstart, wrapped_end))
         total_seqlength = sum(region[1] for region in regions)
     else:
         seqstart += start
